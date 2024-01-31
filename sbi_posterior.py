@@ -10,10 +10,8 @@ import os
 opj = os.path.join
 
 def main(r_prior, r_vector, data_tensor):
-    prior = torch.distributions.half_normal.HalfNormal(torch.tensor([0.1]))
     inference = SNPE(prior=r_prior)
     data_tensor = torch.tensor(data_tensor, dtype=torch.float32)
-    r_vector = torch.tensor(np.transpose([r_vector]), dtype=torch.float32)
     inference = inference.append_simulations(r_vector, data_tensor)
     density_estimator = inference.train()
     posterior = inference.build_posterior(density_estimator)
