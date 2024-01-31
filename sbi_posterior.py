@@ -3,7 +3,7 @@ from sbi.inference import SNPE, prepare_for_sbi, simulate_for_sbi
 from sbi.utils.get_nn_models import posterior_nn
 from sbi import utils as utils
 from sbi import analysis as analysis
-import time
+import numpy as np
 
 import argparse as ap
 import os
