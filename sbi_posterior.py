@@ -9,10 +9,9 @@ import argparse as ap
 import os
 opj = os.path.join
 
-def main(r_vector, data_tensor):
-    #prior = torch.distributions.half_normal.HalfNormal(torch.tensor([0.1]))
-    prior = utils.BoxUniform(low=0.*torch.ones(1), high=0.2*torch.ones(1))
-    inference = SNPE(prior=prior)
+def main(r_prior, r_vector, data_tensor):
+    prior = torch.distributions.half_normal.HalfNormal(torch.tensor([0.1]))
+    inference = SNPE(prior=r_prior)
     data_tensor = torch.tensor(data_tensor, dtype=torch.float32)
     r_vector = torch.tensor(np.transpose([r_vector]), dtype=torch.float32)
     inference = inference.append_simulations(r_vector, data_tensor)
