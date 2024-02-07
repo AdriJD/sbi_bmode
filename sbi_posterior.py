@@ -9,12 +9,13 @@ import argparse as ap
 import os
 opj = os.path.join
 
-def main(r_prior, r_vector, data_tensor, density_estimator="maf"):
+def main(r_prior, r_vector, data_tensor, 
+         density_estimator="maf", learning_rate=0.0005):
     inference = SNPE(prior=r_prior, density_estimator=density_estimator)
     r_vector = torch.tensor(r_vector, dtype=torch.float32)
     data_tensor = torch.tensor(data_tensor, dtype=torch.float32)
     inference = inference.append_simulations(r_vector, data_tensor)
-    density_estimator = inference.train()
+    density_estimator = inference.train(show_train_summary=True, learning_rate=learning_rate)
     posterior = inference.build_posterior(density_estimator)
     return posterior
 
@@ -27,6 +28,8 @@ def get_parser(parser=None):
         help="Numpy array of spectral data for training sbi")
     parser.add_argument("--density_estimator", type="str", action="store",
         help="SNPE kernel options", default="maf")
+    parser.add_argument("--learning_rate", type="float", action="store",
+                       help="ADAM learning rate", default=0.0005)
 
 if __name__ == '__main__':
     parser = get_parser(parser=None)
