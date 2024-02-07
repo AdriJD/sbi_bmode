@@ -8,7 +8,7 @@ from pysm.nominal import models
 
 opj = os.path.join 
 
-def get_mean_spectra(lmax, mean_params):
+def get_mean_spectra(lmax, mean_params, foregrounds):
     """ Computes amplitude power spectra for all components
     """
     ells = np.arange(lmax+1)
@@ -46,8 +46,29 @@ def get_mean_spectra(lmax, mean_params):
     cl_cmb_ee = cl_cmb_ee_lens + mean_params['r_tensor'] * (cl_cmb_ee_r1-cl_cmb_ee_lens)
     cl_cmb_bb = cl_cmb_bb_lens + mean_params['r_tensor'] * (cl_cmb_bb_r1-cl_cmb_bb_lens)
 
-    return(ells, dl2cl, cl2dl, cl_cmb_bb, cl_cmb_ee)
+    if foregrounds is True:
+        # Dust
+        A_dust_BB = mean_params['A_d_BB'] * fcmb(mean_params['nu0_dust'])**2
+        A_dust_EE = mean_params['A_d_EE'] * fcmb(mean_params['nu0_dust'])**2
+        dl_dust_bb = A_dust_BB * ((ells+1E-5) / 80.)**mean_params['alpha_d_BB']
+        dl_dust_ee = A_dust_EE * ((ells+1E-5) / 80.)**mean_params['alpha_d_EE']
+        cl_dust_bb = dl_dust_bb * dl2cl
+        cl_dust_ee = dl_dust_ee * dl2cl
 
+        # Sync
+        A_sync_BB = mean_params['A_s_BB'] * fcmb(mean_params['nu0_sync'])**2
+        A_sync_EE = mean_params['A_s_EE'] * fcmb(mean_params['nu0_sync'])**2
+        dl_sync_bb = A_sync_BB * ((ells+1E-5) / 80.)**mean_params['alpha_s_BB']
+        dl_sync_ee = A_sync_EE * ((ells+1E-5) / 80.)**mean_params['alpha_s_EE']
+        cl_sync_bb = dl_sync_bb * dl2cl
+        cl_sync_ee = dl_sync_ee * dl2cl
+
+        print('I am here')
+        return(ells, dl2cl, cl2dl, cl_dust_bb, cl_dust_ee, cl_sync_bb, 
+               cl_sync_ee, cl_cmb_bb, cl_cmb_ee)
+
+    else:
+        return(ells, dl2cl, cl2dl, cl_cmb_bb, cl_cmb_ee)
 
 def fcmb(nu):
     """ CMB SED (in antenna temperature units).
@@ -431,15 +452,40 @@ def namaster_cl(maps, maps2=None, unit_beams=True, add_mask=False, bpw_edges=Fal
     return cl_out
 
 
+def get_gaussian_beta_map(nside, beta0, amp, gamma=0, l0=80, l_cutoff=2, mean_params=None):
+    """
+    Returns realization of the spectral index map.
+    Args:
+        nside: HEALPix resolution parameter.
+        beta0: mean spectral index.
+        amp: amplitude
+        gamma: tilt
+        l0: pivot scale (default: 80)
+        l_cutoff: ell below which the power spectrum will be zero.
+            (default: 2).
+        seed: seed (if None, a random seed will be used).
+        gaussian: beta map from power law spectrum (if False, a spectral 
+            index map obtained from the Planck data using the Commander code 
+            is used for dust, and ... for sync)  
+    Returns:
+        Spectral index map
+    """
+
+    ls = np.arange(lmax)
+    cls = get_delta_beta_cl(amp, gamma, ls, l0, l_cutoff)
+    mp = hp.synfast(cls, nside, verbose=False)
+    mp += beta0
+    return mp
+
 def get_sky_realization(nside, freqs, plaw_amps=True, gaussian_betas=True, seed=1001,
                         mean_params=None, moment_pars=None,compute_cls=False,
-                        delta_ell=10):
+                        delta_ell=10, foregrounds=False):
     """ Generate a sky realization for a set of input sky parameters.
     Args:
         nside: HEALPix resolution parameter.
         seed: seed to be used (if `None`, then a random seed will
             be used).
-        mean_pars: mean parameters (see `get_default_params`).
+        mean_params: mean parameters (see `get_default_params`).
             If `None`, then a default set will be used.
         moment_pars: mean parameters (see `get_default_params`).
             If `None`, then a default set will be used.
@@ -460,7 +506,54 @@ def get_sky_realization(nside, freqs, plaw_amps=True, gaussian_betas=True, seed=
 
     npix = hp.nside2npix(nside)
     lmax = 3*nside-1
-    ells, dl2cl, cl2dl, cl_cmb_bb, cl_cmb_ee = get_mean_spectra(lmax, mean_params)
+    
+    mean_spectra  = get_mean_spectra(lmax, mean_params, foregrounds) 
+    sky_config = dict()
+    if foregrounds is True:
+        ells, dl2cl, cl2dl, cl_dust_bb, cl_dust_ee, cl_sync_bb, cl_sync_ee, cl_cmb_bb, cl_cmb_ee = mean_spectra
+        cl0 = 0 * cl_dust_bb
+
+        # Dust amplitudes
+        Q_dust, U_dust = hp.synfast([cl0, cl_dust_ee, cl_dust_bb, cl0, cl0, cl0],
+                                    nside, new=True)[1:]
+        # Sync amplitudes
+        Q_sync, U_sync = hp.synfast([cl0, cl_sync_ee, cl_sync_bb, cl0, cl0, cl0],
+                                    nside, new=True)[1:]
+
+        # Dust temperature
+        temp_dust = np.ones(npix) * mean_params['temp_dust']
+
+        # Create PySM simulation
+        zeromap = np.zeros(npix)
+
+        # Dust
+        d2 = models("d2", nside)
+        # Set own parameters
+        d2[0]['spectral_index'] = np.ones(npix)*mean_params['beta_dust']
+        d2[0]['temp'] = mean_params['temp_dust']
+        d2[0]['nu_0_I'] = mean_params['nu0_dust']
+        d2[0]['nu_0_P'] = mean_params['nu0_dust']
+        d2[0]['A_I'] = zeromap
+        d2[0]['A_Q'] = Q_dust
+        d2[0]['A_U'] = U_dust
+
+        # Sync
+        s1 = models("s1", nside)
+        # Set own parameters
+        s1[0]['nu_0_I'] = mean_params['nu0_sync']
+        s1[0]['nu_0_P'] = mean_params['nu0_sync']
+        s1[0]['A_I'] = zeromap
+        s1[0]['A_Q'] = Q_sync
+        s1[0]['A_U'] = U_sync
+        s1[0]['spectral_index'] = np.ones(npix)*mean_params['beta_sync']
+
+        sky_config['dust'] = d2
+        sky_config['synchrotron'] = s1
+
+
+    else:
+
+        ells, dl2cl, cl2dl, cl_cmb_bb, cl_cmb_ee = mean_spectra
 
     cl0 = 0 * cl_cmb_bb
         
@@ -474,7 +567,9 @@ def get_sky_realization(nside, freqs, plaw_amps=True, gaussian_betas=True, seed=
     c1[0]['A_I'] = I_cmb
     c1[0]['A_Q'] = Q_cmb
     c1[0]['A_U'] = U_cmb
-
+    
+    sky_config['cmb'] = c1 
+ 
     # Beams
     if mean_params['unit_beams']==True:
         bms_fwhm = np.ones_like(freqs)
@@ -482,8 +577,6 @@ def get_sky_realization(nside, freqs, plaw_amps=True, gaussian_betas=True, seed=
     else:
         bms_fwhm = get_SO_SAT_beams_fwhms()
         smooth = True
-
-    sky_config = {'cmb' : c1}
 
     sky = pysm.Sky(sky_config)
     instrument_config = {
@@ -573,10 +666,12 @@ def get_apodized_mask_from_nhits(nhits_map,
 
 
 def get_data_spectra(freqs, seed, nside, outdir, mean_params=None,
-                     add_mask=False, write_map=False, write_splits=False):
+                     add_mask=False, write_map=False, write_splits=False,
+                     foregrounds=False):
 
     # Make signal maps
-    maps_signal= get_sky_realization(nside=nside, freqs=freqs, seed=seed, mean_params=mean_params)
+    maps_signal= get_sky_realization(nside=nside, freqs=freqs, seed=seed, mean_params=mean_params,
+                                     foregrounds=foregrounds)
     
     # Make noise splits
     noise = create_noise_splits(freqs=freqs,nside=nside)
@@ -681,6 +776,64 @@ def main():
     )
 
     parser.add_argument(
+        "--beta_dust",
+        action="store",
+        dest="beta_dust",
+        type=float,
+        help="The spectral index for Dust",
+        default=1.54,
+    )
+
+    parser.add_argument(
+        "--A_d_BB",
+        action="store",
+        dest="A_d_BB",
+        type=float,
+        help="The amplitude in multipole space \
+             for Dust",
+        default=28.,
+    )
+    
+    parser.add_argument(
+        "--alpha_d_BB",
+        action="store",
+        dest="alpha_d_BB",
+        type=float,
+        help="The scaling index in multipole space \
+              for Dust",
+        default=-0.16,
+    )
+
+    parser.add_argument(
+        "--beta_sync",
+        action="store",
+        dest="beta_sync",
+        type=float,
+        help="The spectral index for Synchrotron",
+        default=-3.,
+    )
+
+    parser.add_argument(
+        "--A_s_BB",
+        action="store",
+        dest="A_s_BB",
+        type=float,
+        help="The amplitude in multipole space \
+             for Synchrotron",
+        default=1.6,
+    )
+    
+    parser.add_argument(
+        "--alpha_s_BB",
+        action="store",
+        dest="alpha_s_BB",
+        type=float,
+        help="The scaling index in multipole space \
+              for Synchrotron",
+        default=-0.93,
+    )
+
+    parser.add_argument(
         "--unit_beams",
         action="store_true",
         dest="unit_beams",
@@ -688,12 +841,36 @@ def main():
         default=False,
     )
 
+    parser.add_argument(
+        "--foregrounds",
+        action="store_true",
+        dest="foregrounds",
+        help="If True, add dust and synchrotron components.",
+        default=False,
+    )
+
     args = parser.parse_args()
     print('r_tensor=',args.r_tensor, type(args.r_tensor))
     mean_params = dict()
-    mean_params['A_lens'] = 1
-    mean_params['r_tensor'] = args.r_tensor 
-    mean_params['unit_beams'] = args.unit_beams
+    mean_params = {# fixed parameters
+                   'A_lens': 1,
+                   'A_s_EE': 9,
+                   'alpha_s_EE': 0.7,
+                   'A_d_EE': 56,
+                   'alpha_d_EE': -0.32, 
+                   'temp_dust': 20,
+                   'nu0_dust': 353,
+                   'nu0_sync': 23,
+                   # user input parameters
+                   'r_tensor': args.r_tensor,
+                   'unit_beams': args.unit_beams,
+                   'beta_dust': args.beta_dust,
+                   'A_d_BB': args.A_d_BB,
+                   'alpha_d_BB': args.alpha_d_BB,
+                   'beta_sync': args.beta_sync,
+                   'A_s_BB': args.A_s_BB,
+                   'alpha_s_BB': args.alpha_s_BB
+                   }
 
     get_data_spectra(freqs=np.array(args.freqs), 
                      seed=args.seed, 
@@ -702,11 +879,15 @@ def main():
                      mean_params=mean_params, 
                      add_mask=args.add_mask, 
                      write_map=args.write_map, 
-                     write_splits=args.write_splits)
+                     write_splits=args.write_splits,
+                     foregrounds=args.foregrounds)
 
 
 if __name__ == '__main__':
+
+
     main()
     
+
 
 
