@@ -63,7 +63,6 @@ def get_mean_spectra(lmax, mean_params, foregrounds):
         cl_sync_bb = dl_sync_bb * dl2cl
         cl_sync_ee = dl_sync_ee * dl2cl
 
-        print('I am here')
         return(ells, dl2cl, cl2dl, cl_dust_bb, cl_dust_ee, cl_sync_bb, 
                cl_sync_ee, cl_cmb_bb, cl_cmb_ee)
 
@@ -688,6 +687,7 @@ def get_data_spectra(freqs, seed, nside, outdir, mean_params=None,
 
     # Add signal and noise splits
     nsplits = len(maps_noise)
+    all_cls = np.array([]) 
     for s in range(nsplits):
         maps_signoi = maps_signal[:,:,:]+maps_noise[s,:,:,:]
         if add_mask:
@@ -700,8 +700,8 @@ def get_data_spectra(freqs, seed, nside, outdir, mean_params=None,
         cls_unbinned = healpy_cl(maps_signoi)
         filename = 'spectra_r'+str(mean_params['r_tensor'])+'_'+str(seed)+'nsplits'+str(s)
         np.save(opj(outdir,filename), cls_unbinned)
-
-    return
+        all_cls = np.append(all_cls, cls_unbinned)
+    return all_cls
 
 
 
