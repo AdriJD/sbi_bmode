@@ -9,12 +9,12 @@ import argparse as ap
 import os
 opj = os.path.join
 
-def main(r_prior, r_vector, data_tensor, 
+def main(parameter_prior, parameters_tensor, data_tensor, 
          density_estimator="maf", learning_rate=0.0005):
-    inference = SNPE(prior=r_prior, density_estimator=density_estimator)
-    r_vector = torch.tensor(r_vector, dtype=torch.float32)
+    inference = SNPE(prior=parameter_prior, density_estimator=density_estimator)
+    parameters_tensor = torch.tensor(parameters_tensor, dtype=torch.float32)
     data_tensor = torch.tensor(data_tensor, dtype=torch.float32)
-    inference = inference.append_simulations(r_vector, data_tensor)
+    inference = inference.append_simulations(parameters_tensor, data_tensor)
     density_estimator = inference.train(show_train_summary=True, learning_rate=learning_rate)
     posterior = inference.build_posterior(density_estimator)
     return posterior
