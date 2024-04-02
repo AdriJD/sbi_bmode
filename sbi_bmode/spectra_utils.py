@@ -4,8 +4,8 @@ Utilities to generate simple Gaussian CMB + FG spectra.
 import os
 import argparse as ap
 
-from jax import jit, vmap
-import jax.numpy as jnp
+#from jax import jit, vmap
+#import jax.numpy as jnp
 import ducc0
 import numpy as np
 import healpy as hp
@@ -54,7 +54,8 @@ def get_planck_law(freq, temp):
     b0 = b1 * temp ** 2
     xx = hk_ratio * (freq / temp)
 
-    return b0 * temp * xx ** 3 / jnp.expm1(xx)
+    #return b0 * temp * xx ** 3 / jnp.expm1(xx)
+    return b0 * temp * xx ** 3 / np.expm1(xx)
 
 def get_g_fact(freq, temp):
     '''
@@ -76,7 +77,8 @@ def get_g_fact(freq, temp):
 
     xx = hk_ratio * (freq / temp)
 
-    return (jnp.expm1(xx) ** 2) / (xx ** 2 * jnp.exp(xx))
+    #return (jnp.expm1(xx) ** 2) / (xx ** 2 * jnp.exp(xx))
+    return (np.expm1(xx) ** 2) / (xx ** 2 * np.exp(xx))
 
 def get_cmb_spectra(spectra_filepath, lmax):
     '''    
@@ -101,12 +103,12 @@ def get_cmb_spectra(spectra_filepath, lmax):
 
     return out
 
-def get_combined_cmb_spectrum(r_tensor, cov_scalar_ell, cov_tensor_ell):
+def get_combined_cmb_spectrum(r_tensor, A_lens, cov_scalar_ell, cov_tensor_ell):
     '''
 
     '''
 
-    return cov_scalar_ell + r_tensor * cov_tensor_ell
+    return A_lens * cov_scalar_ell + r_tensor * cov_tensor_ell
 
 def get_sed_dust(freq, beta, temp, freq_pivot):
     '''
@@ -134,6 +136,23 @@ def get_sed_dust(freq, beta, temp, freq_pivot):
     
     return ((freq / freq_pivot) ** (beta - 2) * b_freq / b_pivot) ** 2
 
+def get_ell_shape(lmax, alpha, ell_pivot=80):
+    '''
+    Get the ell-dependent part of the template.
+    '''
+
+    #out = jnp.zeros((lmax + 1))
+    #ells = jnp.arange(2, lmax + 1)
+    
+    #out = out.at[2:].set((ells / ell_pivot) ** (alpha + 2))
+
+    out = np.zeros((lmax + 1))
+    ells = np.arange(2, lmax + 1)
+    
+    out[2:] = (ells / ell_pivot) ** (alpha + 2)
+
+    return out
+    
 def get_sed_sync(freq, beta, freq_pivot):
     '''
     The frequency dependent part of Eq. 16 in Choi et al.,
@@ -177,13 +196,14 @@ def get_dust_spectra(amp, alpha, lmax, freq, beta, temp, freq_pivot):
     
     f_factor = get_sed_dust(freq, beta, temp, freq_pivot)
 
-    out = jnp.zeros((lmax + 1))
-    ells = jnp.arange(2, lmax + 1)
+    #out = jnp.zeros((lmax + 1))
+    #ells = jnp.arange(2, lmax + 1)
 
     prefactor = amp * f_factor
 
-    ell_pivot = 80    
-    out = out.at[2:].set(prefactor * (ells / ell_pivot) ** (alpha + 2))
+    #ell_pivot = 80    
+    #out = out.at[2:].set(prefactor * (ells / ell_pivot) ** (alpha + 2))
+    out = get_ell_shape(lmax, alpha) * prefactor
     
     return out
 
@@ -209,13 +229,14 @@ def get_sync_spectra(amp, alpha, lmax, freq, beta, freq_pivot):
 
     f_factor = get_sed_sync(freq, beta, freq_pivot)
     
-    out = jnp.zeros((lmax + 1))
-    ells = jnp.arange(2, lmax + 1)
+    #out = jnp.zeros((lmax + 1))
+    #ells = jnp.arange(2, lmax + 1)
 
     prefactor = amp * f_factor
 
-    ell_pivot = 80
-    out = out.at[2:].set(prefactor * (ells / ell_pivot) ** (alpha + 2))
+    #ell_pivot = 80
+    #out = out.at[2:].set(prefactor * (ells / ell_pivot) ** (alpha + 2))
+    out = get_ell_shape(lmax, alpha) * prefactor
     
     return out
 
@@ -231,7 +252,8 @@ def get_fg_spectra(A_d_EE, alpha_d_EE, alpha_d_BB, beta_dust, nu0_dust, temp_dus
         Sum of dust and synchrotron spectra.
     '''
     
-    out = jnp.zeros((2, 2, lmax + 1))
+    #out = jnp.zeros((2, 2, lmax + 1))
+    out = np.zeros((2, 2, lmax + 1))    
 
     g_factor = get_g_fact(freq, cmb_temp)
 
