@@ -105,6 +105,11 @@ def get_cmb_spectra(spectra_filepath, lmax):
 
 def get_combined_cmb_spectrum(r_tensor, A_lens, cov_scalar_ell, cov_tensor_ell):
     '''
+    
+    
+    Notes
+    -----
+    This is an approximation.
 
     '''
 
@@ -152,8 +157,9 @@ def get_ell_shape(lmax, alpha, ell_pivot=80):
 
     out = np.zeros((lmax + 1))
     ells = np.arange(2, lmax + 1)
+    dells = ells * (ells + 1) / 2 / np.pi
     
-    out[2:] = (ells / ell_pivot) ** (alpha + 2)
+    out[2:] = (ells / ell_pivot) ** (alpha + 2) / dells
 
     return out
     
@@ -205,8 +211,6 @@ def get_dust_spectra(amp, alpha, lmax, freq, beta, temp, freq_pivot):
 
     prefactor = amp * f_factor
 
-    #ell_pivot = 80    
-    #out = out.at[2:].set(prefactor * (ells / ell_pivot) ** (alpha + 2))
     out = get_ell_shape(lmax, alpha) * prefactor
     
     return out

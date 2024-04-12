@@ -19,24 +19,25 @@ lmin = 30
 delta_ell = 10
 
 bins = np.arange(lmin, lmax, delta_ell)
-print(bins)
 nside = 128
 cov_scalar_ell = spectra_utils.get_cmb_spectra(opj(datadir, 'camb_lens_nobb.dat'), lmax)
 cov_tensor_ell = spectra_utils.get_cmb_spectra(opj(datadir, 'camb_lens_r1.dat'), lmax)
 minfo = map_utils.MapInfo.map_info_healpix(nside)
 ainfo = curvedsky.alm_info(lmax)
 
-temp_dust = 19.6
 freqs = [27, 39, 93, 145, 225, 280]
-freq_pivot_dust = 353
-seed = 0
-nsplit = 1
-noise_cov_ell = np.ones((2, 2, lmax + 1)) * np.eye(2)[:,:,np.newaxis] * 0
+nsplit = 2
+noise_cov_ell = np.ones((2, 2, lmax + 1)) * np.eye(2)[:,:,np.newaxis] * 1e-6
 
+# Fixed parameters.
+freq_pivot_dust = 353
+temp_dust = 19.6
+
+# The parameters that we vary.
 A_d_BB = 5
-alpha_d_BB = 1
-beta_dust = 1
-r_tensor = 0
+alpha_d_BB = -0.2
+beta_dust = 1.59
+r_tensor = 0.1
 A_lens = 1
 
 seed = np.random.default_rng(seed=0)
