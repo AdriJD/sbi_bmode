@@ -60,7 +60,7 @@ def get_planck_law(freq, temp):
 def get_g_fact(freq, temp):
     '''
     Compute the conversion factor between antenna and CMB temperature.
-    See Eq 14 in Choi et al.
+    See Eq 14 in Choi et al. (2007.07289).
     
     Parameters
     ----------
@@ -139,6 +139,10 @@ def get_sed_dust(freq, beta, temp, freq_pivot):
 def get_ell_shape(lmax, alpha, ell_pivot=80):
     '''
     Get the ell-dependent part of the template.
+
+    Parameters
+    ----------
+    
     '''
 
     #out = jnp.zeros((lmax + 1))

@@ -46,12 +46,7 @@ omap = sim_utils.gen_data(A_d_BB, alpha_d_BB, beta_dust, freq_pivot_dust, temp_d
                           cov_scalar_ell, cov_tensor_ell, minfo, ainfo)
 spectra = sim_utils.estimate_spectra(omap, minfo, ainfo)
 
-print(spectra.shape)
-
-
 data = sim_utils.get_final_data_vector(spectra, bins, lmin, lmax)
-
-print(data.shape)
 
 fig, ax = plt.subplots(dpi=300)
 ax.plot(data)
