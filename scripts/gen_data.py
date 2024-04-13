@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 from pixell import curvedsky
 from optweight import map_utils
 
-from sbi_bmode import spectra_utils, sim_utils
+from sbi_bmode import spectra_utils, sim_utils, so_utils
 
 opj = os.path.join
 
@@ -25,9 +25,18 @@ cov_tensor_ell = spectra_utils.get_cmb_spectra(opj(datadir, 'camb_lens_r1.dat'),
 minfo = map_utils.MapInfo.map_info_healpix(nside)
 ainfo = curvedsky.alm_info(lmax)
 
-freqs = [27, 39, 93, 145, 225, 280]
 nsplit = 2
-noise_cov_ell = np.ones((2, 2, lmax + 1)) * np.eye(2)[:,:,np.newaxis] * 1e-6
+freq_strings = ['f030', 'f040', 'f090', 'f150', 'f230', 'f290']
+freqs = [so_utils.sat_central_freqs[fstr] for fstr in freq_strings]
+nfreq = len(freqs)
+
+sensitivity_mode = 'goal'
+lknee_mode = 'optimistic'
+noise_cov_ell = np.ones((nfreq, 2, 2, lmax + 1))
+fsky = 0.1
+for fidx, fstr in enumerate(freq_strings):
+    noise_cov_ell[fidx] = np.eye(2)[:,:,np.newaxis] * so_utils.get_sat_noise(
+        fstr, sensitivity_mode, lknee_mode, fsky, lmax)
 
 # Fixed parameters.
 freq_pivot_dust = 353
@@ -49,7 +58,7 @@ spectra = sim_utils.estimate_spectra(omap, minfo, ainfo)
 
 data = sim_utils.get_final_data_vector(spectra, bins, lmin, lmax)
 
-fig, ax = plt.subplots(dpi=300)
+fig, ax = plt.subplots(dpi=300, constrained_layout=True)
 ax.plot(data)
 fig.savefig(opj(imgdir, 'data'))
 plt.close(fig)

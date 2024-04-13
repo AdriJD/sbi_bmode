@@ -88,7 +88,7 @@ def gen_data(A_d_BB, alpha_d_BB, beta_dust, freq_pivot_dust, temp_dust,
         for sidx in range(nsplit):
         
             data_alm = signal_alm + alm_utils.rand_alm(
-                cov_noise_ell, ainfo, rngs_noise[sidx], dtype=np.complex128)
+                cov_noise_ell[fidx], ainfo, rngs_noise[sidx], dtype=np.complex128)
             data_alm = np.asarray(data_alm, dtype=np.complex128)
             sht.alm2map(data_alm, out[sidx,fidx], ainfo, minfo, 2)
             
@@ -116,27 +116,33 @@ def estimate_spectra(imap, minfo, ainfo):
         are included.
     '''
 
-    nsplits = imap.shape[0]
+    nsplit = imap.shape[0]
     nfreq = imap.shape[1]
 
-    ntot = nsplits * nfreq
+    ntot = nsplit * nfreq
     # Number of elements in the upper triangle of the ntot x ntot matrix.
     ntri = ntot * (ntot + 1) // 2
-    
-    alm = np.zeros((nsplits, nfreq, 2, ainfo.nelem), dtype=np.complex128)
-
     out = np.zeros((ntri, 1, ainfo.lmax + 1))    
-
+    
+    alm = np.zeros((nsplit, nfreq, 2, ainfo.nelem), dtype=np.complex128)
     sht.map2alm(imap, alm, minfo, ainfo, 2)    
-    idx = 0
-    for sidx1 in range(nsplits):
-        for fidx1 in range(nfreq):        
-            for sidx2 in range(sidx1, nsplits):        
-                for fidx2 in range(fidx1, nfreq):
 
-                    out[idx] = ainfo.alm2cl(
-                        alm[sidx1,fidx1,:,None,:], alm[sidx2,fidx2,None,:,:])[1,1]                    
-                    idx += 1                    
+    idxs = []
+    for sidx in range(nsplit):
+        for fidx in range(nfreq):
+            idxs.append((sidx, fidx))
+    
+    idx = 0    
+    for idx1 in range(ntot):
+        for idx2 in range(idx1, ntot):
+
+            sidx1, fidx1 = idxs[idx1]
+            sidx2, fidx2 = idxs[idx2]            
+            
+            out[idx] = ainfo.alm2cl(
+                alm[sidx1,fidx1,:,None,:], alm[sidx2,fidx2,None,:,:])[1,1]                    
+            idx += 1
+                        
     return out
 
 def bin_spectrum(spec, ells, bins, lmin, lmax):
