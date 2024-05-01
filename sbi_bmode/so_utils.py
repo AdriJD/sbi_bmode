@@ -101,3 +101,20 @@ def get_sat_noise(fstr, sensitivity_mode, lknee_mode, fsky, lmax, nyear_lf=1,
     n_ell[2:] *= (tot_noise_level * np.sqrt(2)) ** 2 * obs_area
 
     return n_ell
+
+def load_obs_matrix(filename):
+    '''
+    Load an observation matrix into memory
+
+    Parameters
+    ----------
+    filename : str
+      Path to a (.npz) compressed sparse numpy array that is the observation matrix
+
+    Returns
+    -------
+    obs_matrix : array
+        A square matrix
+    '''
+    obs_matrix = scipy.sparse.load_npz(filename)
+    return obs_matrix
