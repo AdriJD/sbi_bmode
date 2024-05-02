@@ -3,6 +3,7 @@ Utils for simulating data using a simple Gaussian foreground model.
 '''
 
 import numpy as np
+import healpy as hp
 from scipy.stats import binned_statistic
 from pixell import curvedsky
 from optweight import alm_utils, sht
