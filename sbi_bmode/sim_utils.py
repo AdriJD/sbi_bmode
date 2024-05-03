@@ -78,6 +78,9 @@ def gen_data(A_d_BB, alpha_d_BB, beta_dust, freq_pivot_dust, temp_dust,
     cmb_alm = alm_utils.rand_alm(cov_ell, ainfo, rng_cmb, dtype=np.complex128)
     dust_alm = alm_utils.rand_alm(cov_dust_ell, ainfo, rng_dust, dtype=np.complex128)
     
+    band_names = ["LF1","LF2","MF1","MF2", "UHF1", "UHF2"]
+    beams = [np.loadtxt("../data/beams/"+band+".txt")[:,1] for band in band_names]
+
     for fidx, freq in enumerate(freqs):
         dust_factor = spectra_utils.get_sed_dust(
             freq, beta_dust, temp_dust, freq_pivot_dust)
@@ -85,6 +88,10 @@ def gen_data(A_d_BB, alpha_d_BB, beta_dust, freq_pivot_dust, temp_dust,
         
         signal_alm = cmb_alm.copy()
         signal_alm += dust_alm * np.sqrt(dust_factor) * g_factor * A_d_BB
+
+        signal_map = hp.alm2map(signal_alm, nside=128)
+        signal_map_beamed = hp.smoothing(signal_map, beam_window=beams[fidx])
+        signal_alm = hp.map2alm(signal_map_beamed)
                         
         for sidx in range(nsplit):
         
