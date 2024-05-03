@@ -95,6 +95,27 @@ def gen_data(A_d_BB, alpha_d_BB, beta_dust, freq_pivot_dust, temp_dust,
             
     return out
 
+def apply_obsmatrix(imap, obs_matrix):
+    '''
+    Transform a set of maps by applying an observation matrix
+
+    Parameters:
+    imap : (nsplit, nfreq, npol, npix) 
+        A set of maps as input
+    obsmatrix: (npol*npix, npol*npix) 
+      A square matrix that simulates observation effects
+    '''
+    reobs_imap = np.empty_like(imap)
+    nsplit = imap.shape[0]
+    nfreq = imap.shape[1]
+    for i in range(nsplit):
+        for j in range(nfreq):
+            nest_imap = hp.reorder(imap[i,j], r2n=True)
+            reobs_imap[i,j] = hp.reorder(obs_matrix.dot(nest_imap.ravel()).reshape([3, -1]), n2r=True)
+  
+    return reobs_imap
+    
+
 def estimate_spectra(imap, minfo, ainfo):
     '''
     Compute all the auto and cross-spectra between splits and
