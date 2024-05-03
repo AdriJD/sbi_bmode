@@ -6,6 +6,7 @@ import numpy as np
 from scipy.stats import binned_statistic
 from pixell import curvedsky
 from optweight import alm_utils, sht
+import healpy as hp
 
 from sbi_bmode import spectra_utils
 
@@ -110,7 +111,7 @@ def estimate_spectra(imap, minfo, ainfo):
     
     Returns
     -------
-    out : (ntri, 2, lmax + 1)
+    out : (ntri, 1, lmax + 1)
         Output BB spectra. Only the elements of the upper-triangular part
         (+ the diagonal) of the (nsplits * nfreq) x (nsplits * nfreq) matrix
         are included.
@@ -141,6 +142,53 @@ def estimate_spectra(imap, minfo, ainfo):
             
             out[idx] = ainfo.alm2cl(
                 alm[sidx1,fidx1,:,None,:], alm[sidx2,fidx2,None,:,:])[1,1]                    
+            idx += 1
+                        
+    return out
+
+def estimate_spectra_nilc(imap, minfo, ainfo):
+    '''
+    Compute all the auto and cross-spectra between splits and
+    and frequency bands. =
+    
+    Parameters
+    ----------
+    imap : (nsplit, ncomp=2, npix)
+        Input maps.
+    minfo : optweight.map_utils.MapInfo object
+        Geometry of output map.
+    ainfo : pixell.curvedsky.alm_info object
+        Layout of spherical harmonic coefficients.
+    
+    Returns
+    -------
+    out : (ntri, 1, lmax + 1)
+        Output BB spectra. Only the elements of the upper-triangular part
+        (+ the diagonal) of the (nsplits * nfreq) x (nsplits * nfreq) matrix
+        are included.
+    '''
+
+    nsplit = imap.shape[0]
+    ncomp = imap.shape[1]
+
+    ntot = nsplit * ncomp
+    # Number of elements in the upper triangle of the ntot x ntot matrix.
+    ntri = ntot * (ntot + 1) // 2
+    out = np.zeros((ntri, 1, ainfo.lmax + 1))      
+
+    idxs = []
+    for sidx in range(nsplit):
+        for fidx in range(ncomp):
+            idxs.append((sidx, fidx))
+    
+    idx = 0    
+    for idx1 in range(ntot):
+        for idx2 in range(idx1, ntot):
+
+            sidx1, fidx1 = idxs[idx1]
+            sidx2, fidx2 = idxs[idx2]            
+
+            out[idx, 0] = hp.anafast(imap[sidx1, fidx1], imap[sidx2, fidx2], lmax=ainfo.lmax)                 
             idx += 1
                         
     return out
