@@ -21,7 +21,7 @@ cov_ell_r1 = spectra_utils.get_cmb_spectra(opj(datadir, 'camb_lens_r1.dat'), lma
 fig, axs = plt.subplots(dpi=300, nrows=2, ncols=2)
 for idxs, ax in np.ndenumerate(axs):
     ax.plot(ells, dells * cov_ell_nobb[idxs])
-    ax.plot(ells, dells * cov_ell_r1[idxs] * -0.1)
+    ax.plot(ells, dells * cov_ell_r1[idxs] * 0.1)
 
 fig.savefig(opj(imgdir, 'cmb_spectra'))
 plt.close(fig)
