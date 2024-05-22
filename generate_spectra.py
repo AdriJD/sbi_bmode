@@ -8,6 +8,7 @@ from pysm.nominal import models
 
 opj = os.path.join 
 
+
 def get_mean_spectra(lmax, mean_params):
     """ Computes amplitude power spectra for all components
     """
@@ -43,8 +44,10 @@ def get_mean_spectra(lmax, mean_params):
     cl_cmb_bb_r1=dlbb * dl2cl
     cl_cmb_ee_r1=dlee * dl2cl
 
-    cl_cmb_ee = cl_cmb_ee_lens + mean_params['r_tensor'] * (cl_cmb_ee_r1-cl_cmb_ee_lens)
-    cl_cmb_bb = cl_cmb_bb_lens + mean_params['r_tensor'] * (cl_cmb_bb_r1-cl_cmb_bb_lens)
+    #cl_cmb_ee = cl_cmb_ee_lens + mean_params['r_tensor'] * (cl_cmb_ee_r1-cl_cmb_ee_lens)
+    #cl_cmb_bb = cl_cmb_bb_lens + mean_params['r_tensor'] * (cl_cmb_bb_r1-cl_cmb_bb_lens)
+    cl_cmb_ee = cl_cmb_ee_lens 
+    cl_cmb_bb = cl_cmb_bb_lens 
 
     return(ells, dl2cl, cl2dl, cl_cmb_bb, cl_cmb_ee)
 
@@ -603,7 +606,8 @@ def get_data_spectra(freqs, seed, nside, outdir, mean_params=None,
                          overwrite=True)
 
         cls_unbinned = healpy_cl(maps_signoi)
-        filename = 'spectra_r'+str(mean_params['r_tensor'])+'_'+str(seed)+'nsplits'+str(s)
+        #filename = 'spectra_r'+str(mean_params['r_tensor'])+'_'+str(seed)+'nsplits'+str(s)
+        filename = 'spectra_r0.0_'+str(seed)+'nsplits'+str(s)
         np.save(opj(outdir,filename), cls_unbinned)
 
     return
@@ -692,7 +696,7 @@ def main():
     print('r_tensor=',args.r_tensor, type(args.r_tensor))
     mean_params = dict()
     mean_params['A_lens'] = 1
-    mean_params['r_tensor'] = args.r_tensor 
+    mean_params['r_tensor'] = 0. #args.r_tensor 
     mean_params['unit_beams'] = args.unit_beams
 
     get_data_spectra(freqs=np.array(args.freqs), 
