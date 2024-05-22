@@ -49,16 +49,21 @@ beta_dust = 1.59
 r_tensor = 0.1
 A_lens = 1
 
-seed = np.random.default_rng(seed=0)
-
-omap = sim_utils.gen_data(A_d_BB, alpha_d_BB, beta_dust, freq_pivot_dust, temp_dust,
-                          r_tensor, A_lens, freqs, seed, nsplit, noise_cov_ell,
-                          cov_scalar_ell, cov_tensor_ell, minfo, ainfo)
-spectra = sim_utils.estimate_spectra(omap, minfo, ainfo)
-
-data = sim_utils.get_final_data_vector(spectra, bins, lmin, lmax)
-
 fig, ax = plt.subplots(dpi=300, constrained_layout=True)
-ax.plot(data)
+
+for A_d_BB in [5, 5, 5]:
+    #seed = np.random.default_rng(seed=0)
+    seed = np.random.default_rng(seed=None)    
+
+    omap = sim_utils.gen_data(A_d_BB, alpha_d_BB, beta_dust, freq_pivot_dust, temp_dust,
+                              r_tensor, A_lens, freqs, seed, nsplit, noise_cov_ell,
+                              cov_scalar_ell, cov_tensor_ell, minfo, ainfo)
+    spectra = sim_utils.estimate_spectra(omap, minfo, ainfo)
+
+    data = sim_utils.get_final_data_vector(spectra, bins, lmin, lmax)
+
+    ax.plot(data, label=f'{A_d_BB}')
+ax.set_yscale('log')
+ax.legend()
 fig.savefig(opj(imgdir, 'data'))
 plt.close(fig)
