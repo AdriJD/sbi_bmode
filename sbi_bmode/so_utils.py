@@ -1,4 +1,5 @@
 import numpy as np
+from scipy.sparse import load_npz
 
 sat_beam_fwhms = {'f030' : 91., 'f040' : 63., 'f090' : 30., 'f150' : 17., 'f230' : 11., f'290' : 9.}
 
@@ -116,5 +117,5 @@ def load_obs_matrix(filename):
     obs_matrix : array
         A square matrix
     '''
-    obs_matrix = scipy.sparse.load_npz(filename)
+    obs_matrix = load_npz(filename)
     return obs_matrix
