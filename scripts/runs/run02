@@ -1,0 +1,30 @@
+#!/bin/bash
+##SBATCH --job-name=run02
+##SBATCH --partition=gen
+###SBATCH --constraint=rome
+##SBATCH --nodes=1
+##SBATCH --ntasks-per-node=1
+##SBATCH --cpus-per-task=40
+##SBATCH --time=00:10:00
+
+#export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
+export OMP_NUM_THREADS=10
+
+module load adri_gcc
+module load adri_base
+source /mnt/home/aduivenvoorden/.pyenv/versions/enki/bin/activate
+
+TAG=run02
+ANADIR=/mnt/home/aduivenvoorden/local/cca_project/scripts
+ODIR=/mnt/home/aduivenvoorden/project/so/20240521_sbi_bmode/${TAG}
+SPECDIR=/mnt/home/aduivenvoorden/local/cca_project/data
+
+r_true=0.05
+for n_train in 500 1000 2000 3000
+do    
+    #srun -u --cpu-bind=cores -c $SLURM_CPUS_PER_TASK python ${ANADIR}/run_sbi_basic.py --odir ${ODIR}/${n_train} --specdir ${SPECDIR} --r_true ${r_true} --n_train ${n_train} --seed -1 --n_samples 10000 --n_rounds 1
+    srun -u -n 1 python ${ANADIR}/run_sbi_basic.py --odir ${ODIR} --specdir ${SPECDIR} --r_true ${r_true} --n_train ${n_train} --seed -1 --n_samples 10000 --n_rounds 2
+done
+
+
+#cp ./slurm-${SLURM_JOB_ID}.out ${ODIR}

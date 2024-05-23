@@ -51,7 +51,7 @@ A_lens = 1
 
 fig, ax = plt.subplots(dpi=300, constrained_layout=True)
 
-for A_d_BB in [5, 5, 5]:
+for A_lens in [0, 1, 10]:
     #seed = np.random.default_rng(seed=0)
     seed = np.random.default_rng(seed=None)    
 
@@ -62,7 +62,7 @@ for A_d_BB in [5, 5, 5]:
 
     data = sim_utils.get_final_data_vector(spectra, bins, lmin, lmax)
 
-    ax.plot(data, label=f'{A_d_BB}')
+    ax.plot(data, label=f'{A_lens}', lw=0.5)
 ax.set_yscale('log')
 ax.legend()
 fig.savefig(opj(imgdir, 'data'))

@@ -62,7 +62,8 @@ def gen_data(A_d_BB, alpha_d_BB, beta_dust, freq_pivot_dust, temp_dust,
     # Spawn rng for dust and noise.
     seed = np.random.default_rng(seed)
     rngs = seed.spawn(2 + nsplit)
-    rng_cmb = rngs[1]        
+    #rng_cmb = rngs[1]
+    rng_cmb = rngs[0]            
     rng_dust = rngs[1]    
     rngs_noise = rngs[2:]
     
@@ -115,8 +116,28 @@ def apply_obsmatrix(imap, obs_matrix):
             reobs_imap[i,j] = hp.reorder(obs_matrix.dot(nest_imap.ravel()).reshape([3, -1]), n2r=True)
   
     return reobs_imap
-    
 
+def get_ntri(nsplit, nfreq):
+    '''
+    Get the number of elements in the upper triangle of the
+    (nsplit x nfreq) x (nsplit x nfreq) matrix.
+
+    Parameters
+    ----------
+    nsplit : int
+        Number of splits.
+    nfreq : int
+        Number of frequencies.
+
+    Returns
+    -------
+    ntri : int
+        Number of elements in upper triangle.
+    '''
+
+    ntot = nsplit * nfreq
+    return ntot * (ntot + 1) // 2
+    
 def estimate_spectra(imap, minfo, ainfo):
     '''
     Compute all the auto and cross-spectra between splits and
@@ -144,7 +165,7 @@ def estimate_spectra(imap, minfo, ainfo):
 
     ntot = nsplit * nfreq
     # Number of elements in the upper triangle of the ntot x ntot matrix.
-    ntri = ntot * (ntot + 1) // 2
+    ntri = get_ntri(nsplit, nfreq)
     out = np.zeros((ntri, 1, ainfo.lmax + 1))    
     
     alm = np.zeros((nsplit, nfreq, 2, ainfo.nelem), dtype=np.complex128)

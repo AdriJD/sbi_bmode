@@ -1,0 +1,6 @@
+run00	Testing run_sbi_basic.py
+run01	Testing run_sbi_basic.py after fixing rng seed bug
+run02	like run01 but with sequential
+run03	like run01 but with a_d_BB prior width =2 instead of 5
+run04	like run03 but sequential
+run05	like run04 but with more sims

@@ -158,7 +158,7 @@ def get_ell_shape(lmax, alpha, ell_pivot=80):
     out = np.zeros((lmax + 1))
     ells = np.arange(2, lmax + 1)
     dells = ells * (ells + 1) / 2 / np.pi
-    
+
     out[2:] = (ells / ell_pivot) ** (alpha + 2) / dells
 
     return out
