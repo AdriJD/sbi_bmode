@@ -4,3 +4,4 @@ run02	like run01 but with sequential
 run03	like run01 but with a_d_BB prior width =2 instead of 5
 run04	like run03 but sequential
 run05	like run04 but with more sims
+run06	sequential with wider prior for A_lens (0.3 instead of 0.1)

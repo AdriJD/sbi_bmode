@@ -1,17 +1,14 @@
 import os
-import multiprocessing
+import yaml
 import pickle
-from time import time
 import argparse
 
 import numpy as np
-import matplotlib.pyplot as plt
 from mpi4py import MPI
 from pixell import curvedsky
 from optweight import map_utils
 import torch
 from torch.distributions import Normal, HalfNormal
-import sbi
 from sbi.inference import SNPE, simulate_for_sbi
 from sbi.utils.sbiutils import seed_all_backends
 from sbi.utils.user_input_checks import (
@@ -25,6 +22,63 @@ from sbi_bmode import spectra_utils, sim_utils, so_utils
 opj = os.path.join
 comm = MPI.COMM_WORLD
 
+def parse_config(config):
+    '''
+    Split the config up into parts.
+    
+    Parameters
+    ----------
+    config : dict
+        Dictionary with "data", "fixed_params" and "params" keys.
+
+    Returns
+    -------
+    data_dict : dict
+        Dictionary with data generations parameters.
+    fixed_params_dict : dict
+        Dictionary with parameters that we keep fixed.
+    params_dict : dict
+        Dictionary with parameters that we sample.    
+    '''
+
+    data_dict = config['data']
+    fixed_params_dict = config['fixed_params']
+    params_dict = config['params']    
+    
+    return data_dict, fixed_params_dict, params_dict
+
+def get_prior(params_dict):
+    '''
+    Parse parameter dictonary and return pytorch prior distribution.
+
+    Parameters
+    ----------
+    params_dict : dict
+        Dictionary with parameters that we sample.    
+
+    Returns
+    -------
+    prior : list of torch.distributions objects
+        Prior distributions for each parameter.
+    param_names : list of str
+        List of parameter names in same order as prior.
+    '''
+    
+    prior = []
+    param_names = []
+    for param, prior_dict in params_dict.items():
+    
+        if prior_dict['prior_type'].lower() == 'normal':
+            prior.append(Normal(*prior_dict['prior_params']))                         
+        elif prior_dict['prior_type'].lower() == 'halfnormal':
+            prior.append(HalfNormal(*prior_dict['prior_params']))
+        else:
+            raise ValueError(f"{prior_dict['prior_type']=} not understood")
+        param_names.append(param)
+    
+    # sbi needs the distributions to not be scalar.
+    return [p.expand(torch.Size([1])) for p in prior], param_names
+    
 class CMBSimulator():
     '''
     Generate CMB data vectors.
@@ -89,6 +143,11 @@ class CMBSimulator():
             Dust frequency power law index.
         seed : int, np.random._generator.Generator object
             Seed or random number generator object.
+
+        Returns
+        -------
+        data : (ndata) array
+            Data realization.
         '''
         
         if seed == -1:
@@ -131,7 +190,7 @@ def simulate_for_sbi_mpi(simulator, proposal, num_sims, ndata, seed, comm):
     sims : (num_sims, ndata) torch tensor, None
         Data draws, only on root rank.
     '''
-
+    
     div, mod = np.divmod(num_sims, comm.size)
     num_sims_per_rank = np.full(comm.size, div, dtype=int)
     num_sims_per_rank[:mod] += 1
@@ -172,7 +231,7 @@ def simulate_for_sbi_mpi(simulator, proposal, num_sims, ndata, seed, comm):
         
     return thetas_full, sims_full
         
-def main(odir, specdir, r_true, seed, n_train, n_samples, n_rounds):
+def main(odir, config, specdir, r_true, seed, n_train, n_samples, n_rounds):
     '''
     Run SBI.
 
@@ -180,6 +239,8 @@ def main(odir, specdir, r_true, seed, n_train, n_samples, n_rounds):
     ----------
     odir : str
         Path to output directory.
+    config : dict
+        Dictionary with "data", "fixed_params" and "params" keys.    
     specdir : str
         Path to data directory containing power spectrum files.
     r_true : float
@@ -207,11 +268,8 @@ def main(odir, specdir, r_true, seed, n_train, n_samples, n_rounds):
     rng_sbi, rng_sims = [np.random.default_rng(s) for s in seed_per_rank.spawn(2)]
     seed_all_backends(int(rng_sbi.integers(2 ** 32 - 1)))
 
-    # Set means: r_tensor=0.1, A_lens=1, A_d_BB=2, alpha_d_BB=-0.2, beta_dust=1.59.
-    prior = [HalfNormal(0.1), Normal(1, 0.1), Normal(5, 2), Normal(-0.2, 0.5),
-             Normal(1.59, 0.11)]
-    # sbi needs the distributions to not be scalar.
-    prior = [p.expand(torch.Size([1])) for p in prior]  
+    data_dict, fixed_params_dict, params_dict = parse_config(config)
+    prior, param_names = get_prior(params_dict)
     prior, num_parameters, prior_returns_numpy = process_prior(prior)
 
     cmb_simulator = CMBSimulator(specdir)
@@ -233,12 +291,19 @@ def main(odir, specdir, r_true, seed, n_train, n_samples, n_rounds):
             cmb_simulator, proposal, n_train, cmb_simulator.size_data, rng_sims, comm)
 
         if comm.rank == 0:
+
+            #torch.set_num_threads(40)
+            print('start', torch.get_num_threads())            
             density_estimator = inference.append_simulations(
                 theta, x, proposal=proposal
             ).train()
             posterior = inference.build_posterior(density_estimator)
             proposal = posterior.set_default_x(x_obs)
 
+            #torch.set_num_threads(1)
+            print('end', torch.get_num_threads())
+
+            
         proposal = comm.bcast(proposal, root=0)
 
     if comm.rank == 0:
@@ -253,6 +318,7 @@ if __name__ == '__main__':
 
     parser = argparse.ArgumentParser()
     parser.add_argument('--odir')
+    parser.add_argument('--config', help="Path to config yaml file.")
     parser.add_argument('--specdir')
     parser.add_argument('--r_true', type=float, default=0.1, help="True value of r.")
     parser.add_argument('--seed', type=int, default=225186655513525153114758457104258967436,
@@ -268,7 +334,11 @@ if __name__ == '__main__':
     odir = opj(args.odir, subdirname)
     if comm.rank == 0:
         os.makedirs(odir, exist_ok=True)
-    comm.Barrier()
-
-    main(odir, args.specdir, args.r_true, args.seed, args.n_train,
+        with open(args.config, 'r') as yfile:
+            config = yaml.safe_load(yfile)
+    else:
+        config = None
+    config = comm.bcast(config, root=0)        
+    print(config)
+    main(odir, config, args.specdir, args.r_true, args.seed, args.n_train,
          args.n_samples, args.n_rounds)
