@@ -10,8 +10,6 @@ import ducc0
 import numpy as np
 import healpy as hp
 import yaml
-#import pysm
-#from pysm.nominal import models
 from pixell import curvedsky
 from optweight import map_utils, sht, alm_utils
 
@@ -83,6 +81,13 @@ def get_g_fact(freq, temp):
 def get_cmb_spectra(spectra_filepath, lmax):
     '''    
     Return the EE and BB spectra from a CAMB text file.
+
+    Parameters
+    ----------
+    spectra_filepath : str
+        Path to CAMB .dat file.
+    lmax : int
+        Truncate spectra to this lmax.
     
     Returns
     -------
@@ -105,12 +110,27 @@ def get_cmb_spectra(spectra_filepath, lmax):
 
 def get_combined_cmb_spectrum(r_tensor, A_lens, cov_scalar_ell, cov_tensor_ell):
     '''
-    
+    Given r and A_lens, combine scalar and tensor constributions.
+
+    Parameters
+    ----------
+    r_tensor : float
+        Tensor-to-scalar ratio.
+    A_lens : float
+        A_lens parameter.
+    cov_scalar_ell : (npol, npol, nell) array
+        Scalar cls.
+    cov_tensor_ell : (npol, npol, nell) array
+        Tensor cls.
+
+    Returns
+    -------
+    cov_tot_ell : (npol, npol, nell) array
+        Combined spectrum.
     
     Notes
     -----
     This is an approximation.
-
     '''
 
     return A_lens * cov_scalar_ell + r_tensor * cov_tensor_ell
@@ -147,7 +167,17 @@ def get_ell_shape(lmax, alpha, ell_pivot=80):
 
     Parameters
     ----------
-    
+    lmax : int
+        Maximum multipole.
+    alpha : float
+        Power law index.
+    ell_pivot : int, optional
+        Pivot multipole.
+
+    Returns
+    -------
+    out : (nell) array
+        Power law.
     '''
 
     #out = jnp.zeros((lmax + 1))
@@ -242,8 +272,6 @@ def get_sync_spectra(amp, alpha, lmax, freq, beta, freq_pivot):
 
     prefactor = amp * f_factor
 
-    #ell_pivot = 80
-    #out = out.at[2:].set(prefactor * (ells / ell_pivot) ** (alpha + 2))
     out = get_ell_shape(lmax, alpha) * prefactor
     
     return out
@@ -277,14 +305,3 @@ def get_fg_spectra(A_d_EE, alpha_d_EE, alpha_d_BB, beta_dust, nu0_dust, temp_dus
     out = out.at[:].multiply(g_factor ** 2)
     
     return out
-
-def get_combined_spectrum(params, cov_scalar_ell, cov_tensor_ell):
-    '''
-    
-    '''
-
-    lmax = cov_scalar_ell.shape[-1] - 1
-
-    #c_ell = get_combined_
-
-    pass

@@ -89,14 +89,14 @@ class CMBSimulator():
         Path to data directory containing power spectrum files.
     '''
     
-    def __init__(self, specdir):
+    def __init__(self, specdir, data_dict, fixed_params_dict):
 
-        self.lmax = 200
-        self.lmin = 30
-        self.nside = 128
-
-        delta_ell = 10
-        self.bins = np.arange(self.lmin, self.lmax, delta_ell)
+        self.lmax = data_dict['lmax']
+        self.lmin = data_dict['lmin']
+        self.nside = data_dict['nside']
+        self.nsplit = data_dict['nsplit']        
+        self.delta_ell = data_dict['delta_ell']
+        self.bins = np.arange(self.lmin, self.lmax, self.delta_ell)
 
         self.cov_scalar_ell = spectra_utils.get_cmb_spectra(
             opj(specdir, 'camb_lens_nobb.dat'), self.lmax)
@@ -106,24 +106,26 @@ class CMBSimulator():
         self.minfo = map_utils.MapInfo.map_info_healpix(self.nside)
         self.ainfo = curvedsky.alm_info(self.lmax)
 
-        self.nsplit = 2
-        freq_strings = ['f030', 'f040', 'f090', 'f150', 'f230', 'f290']
-        self.freqs = [so_utils.sat_central_freqs[fstr] for fstr in freq_strings]
+        self.freq_strings = data_dict['freq_strings']
+        self.freqs = [so_utils.sat_central_freqs[fstr] for fstr in self.freq_strings]
         nfreq = len(self.freqs)
 
         self.size_data = sim_utils.get_ntri(self.nsplit, nfreq) * (self.bins.size - 1)
 
-        sensitivity_mode = 'goal'
-        lknee_mode = 'optimistic'
+        self.sensitivity_mode = data_dict['sensitivity_mode']
+        self.lknee_mode = data_dict['lknee_mode']
         self.noise_cov_ell = np.ones((nfreq, 2, 2, self.lmax + 1))
-        fsky = 0.1
-        for fidx, fstr in enumerate(freq_strings):
+        self.fsky = data_dict['fsky']
+        for fidx, fstr in enumerate(self.freq_strings):
+
+            # We scale the noise with the number of splits.
             self.noise_cov_ell[fidx] = np.eye(2)[:,:,np.newaxis] * so_utils.get_sat_noise(
-                fstr, sensitivity_mode, lknee_mode, fsky, self.lmax)
+                fstr, self.sensitivity_mode, self.lknee_mode, self.fsky, self.lmax) \
+                * self.nsplit
 
         # Fixed parameters.
-        self.freq_pivot_dust = 353
-        self.temp_dust = 19.6
+        self.freq_pivot_dust = fixed_params_dict['freq_pivot_dust']
+        self.temp_dust = fixed_params_dict['temp_dust']
 
     def gen_data(self, r_tensor, A_lens, A_d_BB, alpha_d_BB, beta_dust, seed):
         '''
@@ -164,7 +166,7 @@ class CMBSimulator():
 
         return data
 
-def simulate_for_sbi_mpi(simulator, proposal, num_sims, ndata, seed, comm):
+def simulate_for_sbi_mpi(simulator, proposal, param_names, num_sims, ndata, seed, comm):
     '''
     Draw parameters from proposal and simulate data.
     
@@ -174,6 +176,8 @@ def simulate_for_sbi_mpi(simulator, proposal, num_sims, ndata, seed, comm):
         Instance of simulator class.
     proposal : any
         Proposal distribution for parameters, must have `sample` method.
+    param_names : list of str
+        List if the parameters in same order as samples from the proposal.
     num_sims : int
         Number of simulations to produce.
     ndata : int
@@ -202,8 +206,12 @@ def simulate_for_sbi_mpi(simulator, proposal, num_sims, ndata, seed, comm):
     sims = np.zeros((num_sims_per_rank[comm.rank], ndata))
 
     for idx, theta in enumerate(thetas):
+
+        theta_dict = dict(zip(param_names, theta))
         sims[idx] = simulator.gen_data(
-            theta[0], theta[1], theta[2], theta[3], theta[4], seed)
+            r_tensor=theta_dict['r_tensor'], A_lens=theta_dict['A_lens'],
+            A_d_BB=theta_dict['A_d_BB'], alpha_d_BB=theta_dict['alpha_d_BB'],
+            beta_dust=theta_dict['beta_dust'], seed=seed)
 
     if comm.rank == 0:
         thetas_full = np.zeros(num_sims * ntheta, dtype=np.float64)
@@ -230,7 +238,28 @@ def simulate_for_sbi_mpi(simulator, proposal, num_sims, ndata, seed, comm):
         sims_full = torch.as_tensor(sims_full.reshape(num_sims, ndata).astype(np.float32))
         
     return thetas_full, sims_full
-        
+
+def get_true_params(params_dict):
+    '''
+    Extract the true values of the parameters.
+
+    Parameters
+    ----------
+    params_dict : dict
+        Dictionary with parameters that we sample.    
+    
+    Returns
+    -------
+    true_params : dict
+        Dictionary with params names and values.
+    '''
+
+    true_params = {}
+    for param_name, pd in params_dict.items():
+        true_params[param_name] = pd['true_value']
+
+    return true_params
+
 def main(odir, config, specdir, r_true, seed, n_train, n_samples, n_rounds):
     '''
     Run SBI.
@@ -272,11 +301,18 @@ def main(odir, config, specdir, r_true, seed, n_train, n_samples, n_rounds):
     prior, param_names = get_prior(params_dict)
     prior, num_parameters, prior_returns_numpy = process_prior(prior)
 
-    cmb_simulator = CMBSimulator(specdir)
+    cmb_simulator = CMBSimulator(specdir, data_dict, fixed_params_dict)
 
+    if r_true is not None:
+        params_dict['r_tensor']['true_value'] = r_true
+    true_params = get_true_params(params_dict)
+        
     # Define observations. Important that all ranks agree on this.
-    if comm.rank == 0:
-        x_obs = cmb_simulator.gen_data(r_true, 1, 5, -0.2, 1.59, rng_sims)
+    if comm.rank == 0:                
+        x_obs = cmb_simulator.gen_data(
+            r_tensor=true_params['r_tensor'], A_lens=true_params['A_lens'],
+            A_d_BB=true_params['A_d_BB'], alpha_d_BB=true_params['alpha_d_BB'],
+            beta_dust=true_params['beta_dust'], seed=rng_sims)
     else:
         x_obs = None
     x_obs = comm.bcast(x_obs, root=0)
@@ -288,21 +324,16 @@ def main(odir, config, specdir, r_true, seed, n_train, n_samples, n_rounds):
     for _ in range(n_rounds):
 
         theta, x = simulate_for_sbi_mpi(
-            cmb_simulator, proposal, n_train, cmb_simulator.size_data, rng_sims, comm)
+            cmb_simulator, proposal, param_names, n_train, cmb_simulator.size_data,
+            rng_sims, comm)
 
         if comm.rank == 0:
 
-            #torch.set_num_threads(40)
-            print('start', torch.get_num_threads())            
             density_estimator = inference.append_simulations(
                 theta, x, proposal=proposal
             ).train()
             posterior = inference.build_posterior(density_estimator)
             proposal = posterior.set_default_x(x_obs)
-
-            #torch.set_num_threads(1)
-            print('end', torch.get_num_threads())
-
             
         proposal = comm.bcast(proposal, root=0)
 
@@ -311,7 +342,9 @@ def main(odir, config, specdir, r_true, seed, n_train, n_samples, n_rounds):
             pickle.dump(posterior, handle)
         samples = posterior.sample((n_samples,), x=x_obs)
         np.save(opj(odir, 'samples.npy'), samples)
-
+        with open(opj(odir, 'config.yaml'), "w") as handle:  
+            yaml.safe_dump(config, handle)
+        
     comm.Barrier()
 
 if __name__ == '__main__':
@@ -320,7 +353,7 @@ if __name__ == '__main__':
     parser.add_argument('--odir')
     parser.add_argument('--config', help="Path to config yaml file.")
     parser.add_argument('--specdir')
-    parser.add_argument('--r_true', type=float, default=0.1, help="True value of r.")
+    parser.add_argument('--r_true', type=float, default=None, help="True value of r.")
     parser.add_argument('--seed', type=int, default=225186655513525153114758457104258967436,
                         help="Random seed for the training data.")
     parser.add_argument('--n_train', type=int, default=1000, help="training samples for SNPE")
@@ -339,6 +372,6 @@ if __name__ == '__main__':
     else:
         config = None
     config = comm.bcast(config, root=0)        
-    print(config)
+
     main(odir, config, args.specdir, args.r_true, args.seed, args.n_train,
          args.n_samples, args.n_rounds)
