@@ -2,21 +2,164 @@
 Utils for simulating data using a simple Gaussian foreground model.
 '''
 
+import os
+
 import numpy as np
 import healpy as hp
-from scipy.stats import binned_statistic
 from pixell import curvedsky
-from optweight import alm_utils, sht
+from optweight import alm_utils, sht, map_utils
 import healpy as hp
 
-from sbi_bmode import spectra_utils
+from sbi_bmode import spectra_utils, so_utils
+
+opj = os.path.join
+
+class CMBSimulator():
+    '''
+    Generate CMB data vectors and power spectra.
+
+    Paramaters
+    ----------
+    specdir : str
+        Path to data directory containing power spectrum files.
+    '''
+    
+    def __init__(self, specdir, data_dict, fixed_params_dict):
+
+        self.lmax = data_dict['lmax']
+        self.lmin = data_dict['lmin']
+        self.nside = data_dict['nside']
+        self.nsplit = data_dict['nsplit']        
+        self.delta_ell = data_dict['delta_ell']
+        self.bins = np.arange(self.lmin, self.lmax, self.delta_ell)
+
+        self.cov_scalar_ell = spectra_utils.get_cmb_spectra(
+            opj(specdir, 'camb_lens_nobb.dat'), self.lmax)
+        self.cov_tensor_ell = spectra_utils.get_cmb_spectra(
+            opj(specdir, 'camb_lens_r1.dat'), self.lmax)
+
+        self.minfo = map_utils.MapInfo.map_info_healpix(self.nside)
+        self.ainfo = curvedsky.alm_info(self.lmax)
+
+        self.freq_strings = data_dict['freq_strings']
+        self.freqs = [so_utils.sat_central_freqs[fstr] for fstr in self.freq_strings]
+        self.nfreq = len(self.freqs)
+
+        self.size_data = get_ntri(self.nsplit, self.nfreq) * (self.bins.size - 1)
+
+        self.sensitivity_mode = data_dict['sensitivity_mode']
+        self.lknee_mode = data_dict['lknee_mode']
+        self.noise_cov_ell = np.ones((self.nfreq, 2, 2, self.lmax + 1))
+        self.fsky = data_dict['fsky']
+        
+        for fidx, fstr in enumerate(self.freq_strings):
+
+            # We scale the noise with the number of splits.
+            self.noise_cov_ell[fidx] = np.eye(2)[:,:,np.newaxis] * so_utils.get_sat_noise(
+                fstr, self.sensitivity_mode, self.lknee_mode, self.fsky, self.lmax) \
+                * self.nsplit
+
+        # Fixed parameters.
+        self.freq_pivot_dust = fixed_params_dict['freq_pivot_dust']
+        self.temp_dust = fixed_params_dict['temp_dust']
+
+    def get_signal_spectra(self, r_tensor, A_lens, A_d_BB, alpha_d_BB, beta_dust):
+        '''
+        Generate binned signal frequency cross spectra.
+
+        Parameters
+        ----------
+        r_tensor : float
+            Tensor-to-scalar ratio.
+        A_lens : float
+            A_lens parameter.
+        A_d_BB : float
+        
+        Returns
+        -------
+        cov_bin : (nfreq, nfreq, nbin) array
+            Signal frequency cross spectra.
+        '''
+
+        cov_ell = spectra_utils.get_dust_spectra(
+            A_d_BB, alpha_d_BB, self.lmax, self.freqs, beta_dust, self.temp_dust,
+            self.freq_pivot_dust)
+
+        # Only adding the BB part because `get_dust_spectra` only produces BB.
+        #cov_ell += spectra_utils.get_combined_cmb_spectrum(
+        #    r_tensor, A_lens, self.cov_scalar_ell, self.cov_tensor_ell)[1,1]
+        cov_ell = cov_ell.at[:].add(spectra_utils.get_combined_cmb_spectrum(
+            r_tensor, A_lens, self.cov_scalar_ell, self.cov_tensor_ell)[1,1])
+
+        cov_bin = spectra_utils.bin_spectrum(
+            cov_ell, np.arange(self.lmax+1), self.bins, self.lmin, self.lmax,
+            use_jax=True)
+
+        return cov_bin
+
+    def get_noise_spectra(self, use_jax=False):
+        '''
+
+        Returns
+        -------
+        cov_bin : (nfreq, nfreq, nbin) array
+            Noise frequency cross spectra.        
+        '''
+
+        out = np.zeros((self.nfreq, self.nfreq, self.lmax+1))
+                
+        out[:] = np.eye(self.nfreq)[:,:,np.newaxis] * self.noise_cov_ell[:,1,1]
+
+        cov_bin = spectra_utils.bin_spectrum(
+            out, np.arange(self.lmax+1), self.bins, self.lmin, self.lmax, use_jax=use_jax)
+
+        return cov_bin
+        
+    def draw_data(self, r_tensor, A_lens, A_d_BB, alpha_d_BB, beta_dust, seed):
+        '''
+        Draw data realization.
+
+        Parameters
+        ----------
+        r_tensor : float
+            Tensor-to-scalar ratio.
+        A_lens : float
+            Amplitude of lensing contribution to BB.        
+        A_d_BB : float
+            Dust amplitude.
+        alpha_d_BB : float
+            Dust spatial power law index.
+        beta_dust : float
+            Dust frequency power law index.
+        seed : int, np.random._generator.Generator object
+            Seed or random number generator object.
+
+        Returns
+        -------
+        data : (ndata) array
+            Data realization.
+        '''
+        
+        if seed == -1:
+            seed = None
+        seed = np.random.default_rng(seed=seed)
+
+        omap = gen_data(
+            A_d_BB, alpha_d_BB, beta_dust, self.freq_pivot_dust, self.temp_dust,
+            r_tensor, A_lens, self.freqs, seed, self.nsplit, self.noise_cov_ell,
+            self.cov_scalar_ell, self.cov_tensor_ell, self.minfo, self.ainfo)
+        spectra = estimate_spectra(omap, self.minfo, self.ainfo)
+
+        data = get_final_data_vector(spectra, self.bins, self.lmin, self.lmax)
+
+        return data
 
 def gen_data(A_d_BB, alpha_d_BB, beta_dust, freq_pivot_dust, temp_dust,
              r_tensor, A_lens, freqs, seed, nsplit, cov_noise_ell,
              cov_scalar_ell, cov_tensor_ell, minfo, ainfo):
     '''
     Generate simulated maps.
-    
+
     Parameters
     ----------
     A_d_BB : float
@@ -49,7 +192,7 @@ def gen_data(A_d_BB, alpha_d_BB, beta_dust, freq_pivot_dust, temp_dust,
         Geometry of output map.
     ainfo : pixell.curvedsky.alm_info object
         Layout of spherical harmonic coefficients.
-    
+
     Returns
     -------
     data : (nsplit, nfreq, npol, npix)
@@ -62,11 +205,10 @@ def gen_data(A_d_BB, alpha_d_BB, beta_dust, freq_pivot_dust, temp_dust,
     # Spawn rng for dust and noise.
     seed = np.random.default_rng(seed)
     rngs = seed.spawn(2 + nsplit)
-    #rng_cmb = rngs[1]
-    rng_cmb = rngs[0]            
-    rng_dust = rngs[1]    
+    rng_cmb = rngs[0]
+    rng_dust = rngs[1]
     rngs_noise = rngs[2:]
-    
+
     # Generate the CMB spectra.
     cov_ell = spectra_utils.get_combined_cmb_spectrum(
         r_tensor, A_lens, cov_scalar_ell, cov_tensor_ell)
@@ -79,33 +221,39 @@ def gen_data(A_d_BB, alpha_d_BB, beta_dust, freq_pivot_dust, temp_dust,
 
     cmb_alm = alm_utils.rand_alm(cov_ell, ainfo, rng_cmb, dtype=np.complex128)
     dust_alm = alm_utils.rand_alm(cov_dust_ell, ainfo, rng_dust, dtype=np.complex128)
-    
+
     for fidx, freq in enumerate(freqs):
         dust_factor = spectra_utils.get_sed_dust(
             freq, beta_dust, temp_dust, freq_pivot_dust)
-        g_factor = spectra_utils.get_g_fact(freq, temp_dust)
-        
+        g_factor = spectra_utils.get_g_fact(freq)
+
         signal_alm = cmb_alm.copy()
-        signal_alm += dust_alm * np.sqrt(dust_factor) * g_factor * A_d_BB
-                        
+        signal_alm += dust_alm * np.sqrt(dust_factor * np.abs(A_d_BB)) * g_factor * np.sign(A_d_BB)
+
         for sidx in range(nsplit):
-        
+
             data_alm = signal_alm + alm_utils.rand_alm(
                 cov_noise_ell[fidx], ainfo, rngs_noise[sidx], dtype=np.complex128)
             data_alm = np.asarray(data_alm, dtype=np.complex128)
             sht.alm2map(data_alm, out[sidx,fidx], ainfo, minfo, 2)
-            
+
     return out
 
 def apply_obsmatrix(imap, obs_matrix):
     '''
-    Transform a set of maps by applying an observation matrix
+    Transform a set of maps by applying an observation matrix.
 
-    Parameters:
-    imap : (nsplit, nfreq, npol, npix) 
+    Parameters
+    ----------
+    imap : (nsplit, nfreq, npol, npix) array
         A set of maps as input
-    obsmatrix: (npol*npix, npol*npix) 
+    obsmatrix: (npol*npix, npol*npix) sparse array object
       A square matrix that simulates observation effects
+
+    Returns
+    -------
+    omap : (nsplit, nfreq, npol, npix) array
+        Filtered output maps.
     '''
     reobs_imap = np.empty_like(imap)
     nsplit = imap.shape[0]
@@ -113,8 +261,9 @@ def apply_obsmatrix(imap, obs_matrix):
     for i in range(nsplit):
         for j in range(nfreq):
             nest_imap = hp.reorder(imap[i,j], r2n=True)
-            reobs_imap[i,j] = hp.reorder(obs_matrix.dot(nest_imap.ravel()).reshape([3, -1]), n2r=True)
-  
+            reobs_imap[i,j] = hp.reorder(
+                obs_matrix.dot(nest_imap.ravel()).reshape([3, -1]), n2r=True)
+
     return reobs_imap
 
 def get_ntri(nsplit, nfreq):
@@ -135,14 +284,53 @@ def get_ntri(nsplit, nfreq):
         Number of elements in upper triangle.
     '''
 
+    return nfreq * nfreq * (nsplit * (nsplit - 1) // 2)
+
+def get_tri_indices(nsplit, nfreq):
+    '''
+    Get indices into upper-triangular part of the
+    (nsplits * nfreq) x (nsplits * nfreq) cross-spectrum matrix.
+
+    Parameters
+    ----------
+    nsplit : int
+
+    nfreq : int
+
+    Returns
+    -------
+    tri_indices : (ntri, 4) array
+        The sidx1, fidx1, sidx2, fidx2 indices into the split and freq
+        axes for each element.
+    '''
+
+    idxs = []
+    for sidx in range(nsplit):
+        for fidx in range(nfreq):
+            idxs.append((sidx, fidx))
+
     ntot = nsplit * nfreq
-    return ntot * (ntot + 1) // 2
-    
+    ntri = get_ntri(nsplit, nfreq)
+    tri_indices = np.zeros((ntri, 4), dtype=int)
+
+    idx = 0
+    for idx1 in range(ntot):
+        for idx2 in range(idx1, ntot):
+
+            sidx1, fidx1 = idxs[idx1]
+            sidx2, fidx2 = idxs[idx2]
+            # Exclude all elements that contain equal splits.
+            if sidx1 != sidx2:
+                tri_indices[idx] = [sidx1, fidx1, sidx2, fidx2]
+                idx += 1
+
+    return tri_indices
+
 def estimate_spectra(imap, minfo, ainfo):
     '''
     Compute all the auto and cross-spectra between splits and
     and frequency bands. NOTE Right now EE, EB are discarded.
-    
+
     Parameters
     ----------
     imap : (nsplit, nfreq, 2, npix)
@@ -151,49 +339,36 @@ def estimate_spectra(imap, minfo, ainfo):
         Geometry of output map.
     ainfo : pixell.curvedsky.alm_info object
         Layout of spherical harmonic coefficients.
-    
+
     Returns
     -------
     out : (ntri, 1, lmax + 1)
         Output BB spectra. Only the elements of the upper-triangular part
-        (+ the diagonal) of the (nsplits * nfreq) x (nsplits * nfreq) matrix
-        are included.
+        of the (nsplits * nfreq) x (nsplits * nfreq) matrix are included.
     '''
 
     nsplit = imap.shape[0]
     nfreq = imap.shape[1]
 
-    ntot = nsplit * nfreq
     # Number of elements in the upper triangle of the ntot x ntot matrix.
     ntri = get_ntri(nsplit, nfreq)
-    out = np.zeros((ntri, 1, ainfo.lmax + 1))    
-    
+    out = np.zeros((ntri, 1, ainfo.lmax + 1))
+
     alm = np.zeros((nsplit, nfreq, 2, ainfo.nelem), dtype=np.complex128)
-    sht.map2alm(imap, alm, minfo, ainfo, 2)    
+    sht.map2alm(imap, alm, minfo, ainfo, 2)
 
-    idxs = []
-    for sidx in range(nsplit):
-        for fidx in range(nfreq):
-            idxs.append((sidx, fidx))
-    
-    idx = 0    
-    for idx1 in range(ntot):
-        for idx2 in range(idx1, ntot):
+    tri_indices = get_tri_indices(nsplit, nfreq)
+    for idx, (sidx1, fidx1, sidx2, fidx2) in enumerate(tri_indices):
+        out[idx] = ainfo.alm2cl(
+            alm[sidx1,fidx1,:,None,:], alm[sidx2,fidx2,None,:,:])[1,1]
 
-            sidx1, fidx1 = idxs[idx1]
-            sidx2, fidx2 = idxs[idx2]            
-            
-            out[idx] = ainfo.alm2cl(
-                alm[sidx1,fidx1,:,None,:], alm[sidx2,fidx2,None,:,:])[1,1]                    
-            idx += 1
-                        
     return out
 
 def estimate_spectra_nilc(imap, minfo, ainfo):
     '''
     Compute all the auto and cross-spectra between splits and
     and frequency bands. =
-    
+
     Parameters
     ----------
     imap : (nsplit, ncomp=2, npix)
@@ -202,7 +377,7 @@ def estimate_spectra_nilc(imap, minfo, ainfo):
         Geometry of output map.
     ainfo : pixell.curvedsky.alm_info object
         Layout of spherical harmonic coefficients.
-    
+
     Returns
     -------
     out : (ntri, 1, lmax + 1)
@@ -217,49 +392,24 @@ def estimate_spectra_nilc(imap, minfo, ainfo):
     ntot = nsplit * ncomp
     # Number of elements in the upper triangle of the ntot x ntot matrix.
     ntri = ntot * (ntot + 1) // 2
-    out = np.zeros((ntri, 1, ainfo.lmax + 1))      
+    out = np.zeros((ntri, 1, ainfo.lmax + 1))
 
     idxs = []
     for sidx in range(nsplit):
         for fidx in range(ncomp):
             idxs.append((sidx, fidx))
-    
-    idx = 0    
+
+    idx = 0
     for idx1 in range(ntot):
         for idx2 in range(idx1, ntot):
 
             sidx1, fidx1 = idxs[idx1]
-            sidx2, fidx2 = idxs[idx2]            
+            sidx2, fidx2 = idxs[idx2]
 
-            out[idx, 0] = hp.anafast(imap[sidx1, fidx1], imap[sidx2, fidx2], lmax=ainfo.lmax)                 
+            out[idx, 0] = hp.anafast(imap[sidx1, fidx1], imap[sidx2, fidx2], lmax=ainfo.lmax)
             idx += 1
-                        
+
     return out
-
-def bin_spectrum(spec, ells, bins, lmin, lmax):
-    '''
-    Bin input spectra.
-    
-    Parameters
-    ----------
-    spec : (..., lmax + 1)
-        Input spectra.
-    ells :
-        Multipole array corresponding to the spectra.
-    bins : (nbin + 1) array
-        Output bins. Specify the rightmost edge.
-    lmin : int
-        Do not use multipoles below lmin.
-    lmax : int
-        Do not use multipoles below lmax.    
-    
-    Returns
-    -------
-    spec_binned : (nbin) array
-       Binned output. 
-    '''
-
-    return binned_statistic(ells, spec, bins=bins, range=(lmin, lmax+1))[0]
 
 def get_final_data_vector(spec, bins, lmin, lmax):
     '''
@@ -274,20 +424,20 @@ def get_final_data_vector(spec, bins, lmin, lmax):
     lmin : int
         Do not use multipoles below lmin.
     lmax : int
-        Do not use multipoles below lmax.    
-    
+        Do not use multipoles below lmax.
+
     Returns
-    -------    
+    -------
     out : (prod(...) * nbin) array
-        Flattened and binned output array.        
+        Flattened and binned output array.
     '''
-    
+
     preshape = spec.shape[:-1]
     ells = np.arange(spec.shape[-1])
     out = np.zeros(preshape + (bins.size - 1,))
 
     for idxs in np.ndindex(preshape):
 
-        out[idxs] = bin_spectrum(spec[idxs], ells, bins, lmin, lmax)
+        out[idxs] = spectra_utils.bin_spectrum(spec[idxs], ells, bins, lmin, lmax)
 
     return out.reshape(-1)

@@ -17,39 +17,14 @@ from sbi.utils.user_input_checks import (
     process_simulator,
 )
 
-from sbi_bmode import spectra_utils, sim_utils, so_utils
+from sbi_bmode import spectra_utils, sim_utils, so_utils, script_utils
 
 opj = os.path.join
 comm = MPI.COMM_WORLD
 
-def parse_config(config):
-    '''
-    Split the config up into parts.
-    
-    Parameters
-    ----------
-    config : dict
-        Dictionary with "data", "fixed_params" and "params" keys.
-
-    Returns
-    -------
-    data_dict : dict
-        Dictionary with data generations parameters.
-    fixed_params_dict : dict
-        Dictionary with parameters that we keep fixed.
-    params_dict : dict
-        Dictionary with parameters that we sample.    
-    '''
-
-    data_dict = config['data']
-    fixed_params_dict = config['fixed_params']
-    params_dict = config['params']    
-    
-    return data_dict, fixed_params_dict, params_dict
-
 def get_prior(params_dict):
     '''
-    Parse parameter dictonary and return pytorch prior distribution.
+    Parse parameter dictionary and return pytorch prior distribution.
 
     Parameters
     ----------
@@ -79,93 +54,6 @@ def get_prior(params_dict):
     # sbi needs the distributions to not be scalar.
     return [p.expand(torch.Size([1])) for p in prior], param_names
     
-class CMBSimulator():
-    '''
-    Generate CMB data vectors.
-
-    Paramaters
-    ----------
-    specdir : str
-        Path to data directory containing power spectrum files.
-    '''
-    
-    def __init__(self, specdir, data_dict, fixed_params_dict):
-
-        self.lmax = data_dict['lmax']
-        self.lmin = data_dict['lmin']
-        self.nside = data_dict['nside']
-        self.nsplit = data_dict['nsplit']        
-        self.delta_ell = data_dict['delta_ell']
-        self.bins = np.arange(self.lmin, self.lmax, self.delta_ell)
-
-        self.cov_scalar_ell = spectra_utils.get_cmb_spectra(
-            opj(specdir, 'camb_lens_nobb.dat'), self.lmax)
-        self.cov_tensor_ell = spectra_utils.get_cmb_spectra(
-            opj(specdir, 'camb_lens_r1.dat'), self.lmax)
-
-        self.minfo = map_utils.MapInfo.map_info_healpix(self.nside)
-        self.ainfo = curvedsky.alm_info(self.lmax)
-
-        self.freq_strings = data_dict['freq_strings']
-        self.freqs = [so_utils.sat_central_freqs[fstr] for fstr in self.freq_strings]
-        nfreq = len(self.freqs)
-
-        self.size_data = sim_utils.get_ntri(self.nsplit, nfreq) * (self.bins.size - 1)
-
-        self.sensitivity_mode = data_dict['sensitivity_mode']
-        self.lknee_mode = data_dict['lknee_mode']
-        self.noise_cov_ell = np.ones((nfreq, 2, 2, self.lmax + 1))
-        self.fsky = data_dict['fsky']
-        for fidx, fstr in enumerate(self.freq_strings):
-
-            # We scale the noise with the number of splits.
-            self.noise_cov_ell[fidx] = np.eye(2)[:,:,np.newaxis] * so_utils.get_sat_noise(
-                fstr, self.sensitivity_mode, self.lknee_mode, self.fsky, self.lmax) \
-                * self.nsplit
-
-        # Fixed parameters.
-        self.freq_pivot_dust = fixed_params_dict['freq_pivot_dust']
-        self.temp_dust = fixed_params_dict['temp_dust']
-
-    def gen_data(self, r_tensor, A_lens, A_d_BB, alpha_d_BB, beta_dust, seed):
-        '''
-        Draw data realization.
-
-        Parameters
-        ----------
-        r_tensor : float
-            Tensor-to-scalar ratio.
-        A_lens : float
-            Amplitude of lensing contribution to BB.        
-        A_d_BB : float
-            Dust amplitude.
-        alpha_d_BB : float
-            Dust spatial power law index.
-        beta_dust : float
-            Dust frequency power law index.
-        seed : int, np.random._generator.Generator object
-            Seed or random number generator object.
-
-        Returns
-        -------
-        data : (ndata) array
-            Data realization.
-        '''
-        
-        if seed == -1:
-            seed = None # unpredicable
-        seed = np.random.default_rng(seed=seed)
-
-        omap = sim_utils.gen_data(
-            A_d_BB, alpha_d_BB, beta_dust, self.freq_pivot_dust, self.temp_dust,
-            r_tensor, A_lens, self.freqs, seed, self.nsplit, self.noise_cov_ell,
-            self.cov_scalar_ell, self.cov_tensor_ell, self.minfo, self.ainfo)
-        spectra = sim_utils.estimate_spectra(omap, self.minfo, self.ainfo)
-
-        data = sim_utils.get_final_data_vector(spectra, self.bins, self.lmin, self.lmax)
-
-        return data
-
 def simulate_for_sbi_mpi(simulator, proposal, param_names, num_sims, ndata, seed, comm):
     '''
     Draw parameters from proposal and simulate data.
@@ -208,7 +96,7 @@ def simulate_for_sbi_mpi(simulator, proposal, param_names, num_sims, ndata, seed
     for idx, theta in enumerate(thetas):
 
         theta_dict = dict(zip(param_names, theta))
-        sims[idx] = simulator.gen_data(
+        sims[idx] = simulator.draw_data(
             r_tensor=theta_dict['r_tensor'], A_lens=theta_dict['A_lens'],
             A_d_BB=theta_dict['A_d_BB'], alpha_d_BB=theta_dict['alpha_d_BB'],
             beta_dust=theta_dict['beta_dust'], seed=seed)
@@ -297,11 +185,11 @@ def main(odir, config, specdir, r_true, seed, n_train, n_samples, n_rounds):
     rng_sbi, rng_sims = [np.random.default_rng(s) for s in seed_per_rank.spawn(2)]
     seed_all_backends(int(rng_sbi.integers(2 ** 32 - 1)))
 
-    data_dict, fixed_params_dict, params_dict = parse_config(config)
+    data_dict, fixed_params_dict, params_dict = script_utils.parse_config(config)
     prior, param_names = get_prior(params_dict)
     prior, num_parameters, prior_returns_numpy = process_prior(prior)
 
-    cmb_simulator = CMBSimulator(specdir, data_dict, fixed_params_dict)
+    cmb_simulator = sim_utils.CMBSimulator(specdir, data_dict, fixed_params_dict)
 
     if r_true is not None:
         params_dict['r_tensor']['true_value'] = r_true
@@ -309,7 +197,7 @@ def main(odir, config, specdir, r_true, seed, n_train, n_samples, n_rounds):
         
     # Define observations. Important that all ranks agree on this.
     if comm.rank == 0:                
-        x_obs = cmb_simulator.gen_data(
+        x_obs = cmb_simulator.draw_data(
             r_tensor=true_params['r_tensor'], A_lens=true_params['A_lens'],
             A_d_BB=true_params['A_d_BB'], alpha_d_BB=true_params['alpha_d_BB'],
             beta_dust=true_params['beta_dust'], seed=rng_sims)
@@ -331,7 +219,7 @@ def main(odir, config, specdir, r_true, seed, n_train, n_samples, n_rounds):
 
             density_estimator = inference.append_simulations(
                 theta, x, proposal=proposal
-            ).train()
+            ).train(show_train_summary=True)
             posterior = inference.build_posterior(density_estimator)
             proposal = posterior.set_default_x(x_obs)
             
@@ -342,6 +230,7 @@ def main(odir, config, specdir, r_true, seed, n_train, n_samples, n_rounds):
             pickle.dump(posterior, handle)
         samples = posterior.sample((n_samples,), x=x_obs)
         np.save(opj(odir, 'samples.npy'), samples)
+        np.save(opj(odir, 'data.npy'), x_obs)        
         with open(opj(odir, 'config.yaml'), "w") as handle:  
             yaml.safe_dump(config, handle)
         
@@ -362,9 +251,10 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
 
-    subdirname = 'r%.2e_s%d_nt%d_ns%d_nr%d' % (args.r_true, args.seed, args.n_train,
-                                               args.n_samples, args.n_rounds)
-    odir = opj(args.odir, subdirname)
+    #subdirname = 'r%.2e_s%d_nt%d_ns%d_nr%d' % (args.r_true, args.seed, args.n_train,
+    #                                           args.n_samples, args.n_rounds)
+    #odir = opj(args.odir, subdirname)
+    odir = args.odir
     if comm.rank == 0:
         os.makedirs(odir, exist_ok=True)
         with open(args.config, 'r') as yfile:
