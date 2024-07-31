@@ -14,6 +14,9 @@ from scipy.stats import binned_statistic
 from pixell import curvedsky
 from optweight import map_utils, sht, alm_utils
 
+import jax
+jax.config.update("jax_enable_x64", True)
+
 # CMB temperature in Kelvin.
 cmb_temp = 2.726
 
