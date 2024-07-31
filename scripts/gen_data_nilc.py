@@ -82,7 +82,8 @@ for split in range(nsplit):
         alm_T, alm_E, alm_B = hp.map2alm([np.zeros_like(Q), Q, U], pol=True) #alm_T is just a placeholder
         B_maps[split, f] = 10**(-6)*hp.alm2map(alm_B, nside)
 map_tmpdir = nilc_utils.write_maps(B_maps, output_dir=output_dir)
-nilc_maps = nilc_utils.get_nilc_maps(pyilc_path, map_tmpdir, nsplit, nside, dust_pars, 
+nilc_maps = nilc_utils.get_nilc_maps(pyilc_path, map_tmpdir, nsplit, nside, 
+                                     dust_pars['beta_dust'], dust_pars['temp_dust'], dust_pars['freq_pivot_dust'], 
                                      so_utils.sat_central_freqs, so_utils.sat_beam_fwhms,
                                      output_dir=output_dir, remove_files=True, debug=False)
 

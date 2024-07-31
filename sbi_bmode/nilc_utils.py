@@ -27,7 +27,7 @@ def write_maps(B_maps, output_dir=None):
     return map_tmpdir
 
 
-def get_nilc_maps(pyilc_path, map_tmpdir, nsplit, nside, dust_pars, 
+def get_nilc_maps(pyilc_path, map_tmpdir, nsplit, nside, beta_dust, temp_dust, freq_pivot_dust, 
                   sat_central_freqs, sat_beam_fwhms, output_dir=None, remove_files=True, debug=False):
     '''
     Parameters
@@ -36,7 +36,9 @@ def get_nilc_maps(pyilc_path, map_tmpdir, nsplit, nside, dust_pars,
     map_tmpdir: str, path where frequency maps have been written
     nsplit: int, number of splits
     nside: int, resolution parameter for maps
-    dust_pars: dict, contains values of dust parameters
+    beta_dust: float, beta dust parameter
+    temp_dust: float, temperature of dust
+    freq_pivot_dust: float, pivot frequency of dust
     sat_central_freqs: dict, maps frequency strings to floats representing frequencies
     sat_beam_fwhms: dict, maps frequency strings to floats representing beam FWHM
     output_dir: str, directory in which to make temporary directory for NILC maps
@@ -84,7 +86,7 @@ def get_nilc_maps(pyilc_path, map_tmpdir, nsplit, nside, dust_pars,
         pyilc_input_params['save_as'] = 'fits'
 
         #Dust parameters
-        pars = {'beta_CIB': dust_pars['beta_dust'], 'Tdust_CIB': dust_pars['temp_dust'], 'nu0_CIB_ghz': dust_pars['freq_pivot_dust'],
+        pars = {'beta_CIB': float(beta_dust), 'Tdust_CIB': float(temp_dust), 'nu0_CIB_ghz': float(freq_pivot_dust),
                 'kT_e_keV':5.0, 'nu0_radio_ghz':150.0, 'beta_radio': -0.5}
         dust_pars_yaml = f'{nilc_tmpdir}/dust_pars.yaml'
         with open(dust_pars_yaml, 'w') as outfile:
