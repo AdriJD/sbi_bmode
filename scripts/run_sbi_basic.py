@@ -4,6 +4,7 @@ import pickle
 import argparse
 
 import numpy as np
+import healpy as hp
 from mpi4py import MPI
 from pixell import curvedsky
 from optweight import map_utils
@@ -17,7 +18,9 @@ from sbi.utils.user_input_checks import (
     process_simulator,
 )
 
-from sbi_bmode import spectra_utils, sim_utils, so_utils
+import sys
+sys.path.append('..')
+from sbi_bmode import spectra_utils, sim_utils, so_utils, nilc_utils
 
 opj = os.path.join
 comm = MPI.COMM_WORLD
@@ -83,19 +86,23 @@ class CMBSimulator():
     '''
     Generate CMB data vectors.
 
-    Paramaters
+    Parameters
     ----------
     specdir : str
         Path to data directory containing power spectrum files.
+    pyilcdir: str
+        Path to pyilc respository. Setting to None means NILC is not used.
     '''
     
-    def __init__(self, specdir, data_dict, fixed_params_dict):
+    def __init__(self, specdir, data_dict, fixed_params_dict, pyilcdir, odir):
 
         self.lmax = data_dict['lmax']
         self.lmin = data_dict['lmin']
         self.nside = data_dict['nside']
         self.nsplit = data_dict['nsplit']        
         self.delta_ell = data_dict['delta_ell']
+        self.pyilcdir = pyilcdir
+        self.odir = odir
         self.bins = np.arange(self.lmin, self.lmax, self.delta_ell)
 
         self.cov_scalar_ell = spectra_utils.get_cmb_spectra(
@@ -109,8 +116,11 @@ class CMBSimulator():
         self.freq_strings = data_dict['freq_strings']
         self.freqs = [so_utils.sat_central_freqs[fstr] for fstr in self.freq_strings]
         nfreq = len(self.freqs)
-
-        self.size_data = sim_utils.get_ntri(self.nsplit, nfreq) * (self.bins.size - 1)
+        ncomp = 2
+        if pyilcdir:
+            self.size_data = sim_utils.get_ntri(self.nsplit, ncomp) * (self.bins.size - 1)
+        else:
+            self.size_data = sim_utils.get_ntri(self.nsplit, nfreq) * (self.bins.size - 1)
 
         self.sensitivity_mode = data_dict['sensitivity_mode']
         self.lknee_mode = data_dict['lknee_mode']
@@ -160,9 +170,27 @@ class CMBSimulator():
             A_d_BB, alpha_d_BB, beta_dust, self.freq_pivot_dust, self.temp_dust,
             r_tensor, A_lens, self.freqs, seed, self.nsplit, self.noise_cov_ell,
             self.cov_scalar_ell, self.cov_tensor_ell, self.minfo, self.ainfo)
-        spectra = sim_utils.estimate_spectra(omap, self.minfo, self.ainfo)
-
-        data = sim_utils.get_final_data_vector(spectra, self.bins, self.lmin, self.lmax)
+        
+        if self.pyilcdir:
+            # build NILC B-mode maps with shape (nsplit, ncomp=2, npix)
+            nfreq = len(self.freqs)
+            B_maps = np.zeros((self.nsplit, nfreq, self.minfo.npix))
+            for split in range(self.nsplit):
+                for f, freq_str in enumerate(self.freq_strings):
+                    Q, U = omap[split, f]
+                    alm_T, alm_E, alm_B = hp.map2alm([np.zeros_like(Q), Q, U], pol=True) #alm_T is just a placeholder
+                    B_maps[split, f] = 10**(-6)*hp.alm2map(alm_B, self.nside)
+            map_tmpdir = nilc_utils.write_maps(B_maps, output_dir=self.odir)
+            nilc_maps = nilc_utils.get_nilc_maps(self.pyilcdir, map_tmpdir, self.nsplit, self.nside, 
+                                                beta_dust, self.temp_dust, self.freq_pivot_dust, 
+                                                so_utils.sat_central_freqs, so_utils.sat_beam_fwhms,
+                                                output_dir=self.odir, remove_files=True, debug=False)
+            spectra = sim_utils.estimate_spectra_nilc(nilc_maps, self.minfo, self.ainfo)
+            data = sim_utils.get_final_data_vector(spectra, self.bins, self.lmin, self.lmax)
+        
+        else:
+            spectra = sim_utils.estimate_spectra(omap, self.minfo, self.ainfo)
+            data = sim_utils.get_final_data_vector(spectra, self.bins, self.lmin, self.lmax)
 
         return data
 
@@ -260,7 +288,7 @@ def get_true_params(params_dict):
 
     return true_params
 
-def main(odir, config, specdir, r_true, seed, n_train, n_samples, n_rounds):
+def main(odir, config, specdir, r_true, seed, n_train, n_samples, n_rounds, pyilcdir):
     '''
     Run SBI.
 
@@ -282,6 +310,8 @@ def main(odir, config, specdir, r_true, seed, n_train, n_samples, n_rounds):
         Number of posterior samples to draw.
     n_rounds : int
         Number of simulation rounds, if 1: NPE, if >1, SNPE.
+    pyilcdir: str
+        Path to pyilc repository. If None, nilc not performed.
     '''
 
     # Seed SBI. Annoyingly, this is using a bunch of global seeds. Every rank
@@ -301,7 +331,7 @@ def main(odir, config, specdir, r_true, seed, n_train, n_samples, n_rounds):
     prior, param_names = get_prior(params_dict)
     prior, num_parameters, prior_returns_numpy = process_prior(prior)
 
-    cmb_simulator = CMBSimulator(specdir, data_dict, fixed_params_dict)
+    cmb_simulator = CMBSimulator(specdir, data_dict, fixed_params_dict, pyilcdir, odir)
 
     if r_true is not None:
         params_dict['r_tensor']['true_value'] = r_true
@@ -353,6 +383,7 @@ if __name__ == '__main__':
     parser.add_argument('--odir')
     parser.add_argument('--config', help="Path to config yaml file.")
     parser.add_argument('--specdir')
+    parser.add_argument('--pyilcdir', default=None, help="Path to pyilc repository. Set to None to use multifrequency PS instead of NILC PS.")
     parser.add_argument('--r_true', type=float, default=None, help="True value of r.")
     parser.add_argument('--seed', type=int, default=225186655513525153114758457104258967436,
                         help="Random seed for the training data.")
@@ -374,4 +405,4 @@ if __name__ == '__main__':
     config = comm.bcast(config, root=0)        
 
     main(odir, config, args.specdir, args.r_true, args.seed, args.n_train,
-         args.n_samples, args.n_rounds)
+         args.n_samples, args.n_rounds, args.pyilcdir)
