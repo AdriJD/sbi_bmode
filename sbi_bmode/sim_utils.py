@@ -393,7 +393,7 @@ def estimate_spectra(imap, minfo, ainfo):
 def estimate_spectra_nilc(imap, minfo, ainfo):
     '''
     Compute all the auto and cross-spectra between splits and
-    and frequency bands. =
+    and frequency bands.
 
     Parameters
     ----------
@@ -415,25 +415,13 @@ def estimate_spectra_nilc(imap, minfo, ainfo):
     nsplit = imap.shape[0]
     ncomp = imap.shape[1]
 
-    ntot = nsplit * ncomp
     # Number of elements in the upper triangle of the ntot x ntot matrix.
-    ntri = ntot * (ntot + 1) // 2
+    ntri = get_ntri(nsplit, ncomp)
     out = np.zeros((ntri, 1, ainfo.lmax + 1))
 
-    idxs = []
-    for sidx in range(nsplit):
-        for fidx in range(ncomp):
-            idxs.append((sidx, fidx))
-
-    idx = 0
-    for idx1 in range(ntot):
-        for idx2 in range(idx1, ntot):
-
-            sidx1, fidx1 = idxs[idx1]
-            sidx2, fidx2 = idxs[idx2]
-
-            out[idx, 0] = hp.anafast(imap[sidx1, fidx1], imap[sidx2, fidx2], lmax=ainfo.lmax)
-            idx += 1
+    tri_indices = get_tri_indices(nsplit, ncomp)
+    for idx, (sidx1, fidx1, sidx2, fidx2) in enumerate(tri_indices):
+        out[idx, 0] = hp.anafast(imap[sidx1, fidx1], imap[sidx2, fidx2], lmax=ainfo.lmax)
 
     return out
 
