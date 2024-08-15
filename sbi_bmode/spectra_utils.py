@@ -3,17 +3,19 @@ Utilities to generate simple Gaussian CMB + FG spectra.
 '''
 import os
 import argparse as ap
+import yaml
 
-#from jax import jit, vmap
-#import jax.numpy as jnp
+from jax import jit, vmap
+import jax.numpy as jnp
 import ducc0
 import numpy as np
 import healpy as hp
-import yaml
-#import pysm
-#from pysm.nominal import models
+from scipy.stats import binned_statistic
 from pixell import curvedsky
 from optweight import map_utils, sht, alm_utils
+
+import jax
+jax.config.update("jax_enable_x64", True)
 
 # CMB temperature in Kelvin.
 cmb_temp = 2.726
@@ -54,10 +56,10 @@ def get_planck_law(freq, temp):
     b0 = b1 * temp ** 2
     xx = hk_ratio * (freq / temp)
 
-    #return b0 * temp * xx ** 3 / jnp.expm1(xx)
-    return b0 * temp * xx ** 3 / np.expm1(xx)
+    return b0 * temp * xx ** 3 / jnp.expm1(xx)
+    #return b0 * temp * xx ** 3 / np.expm1(xx)
 
-def get_g_fact(freq, temp):
+def get_g_fact(freq, temp=cmb_temp):
     '''
     Compute the conversion factor between antenna and CMB temperature.
     See Eq 14 in Choi et al. (2007.07289).
@@ -66,23 +68,30 @@ def get_g_fact(freq, temp):
     ----------
     freq : (nfreq) array
         Input frequencies in Hz.
-    temp : float
+    temp : float, optional
         Input temperature in Kelvin.
 
     Returns
     -------
-     : (nfreq) array
-
+    g_fact : (nfreq) array
+    
     '''
 
     xx = hk_ratio * (freq / temp)
 
-    #return (jnp.expm1(xx) ** 2) / (xx ** 2 * jnp.exp(xx))
-    return (np.expm1(xx) ** 2) / (xx ** 2 * np.exp(xx))
+    return (jnp.expm1(xx) ** 2) / (xx ** 2 * jnp.exp(xx))
+    #return (np.expm1(xx) ** 2) / (xx ** 2 * np.exp(xx))
 
 def get_cmb_spectra(spectra_filepath, lmax):
     '''    
     Return the EE and BB spectra from a CAMB text file.
+
+    Parameters
+    ----------
+    spectra_filepath : str
+        Path to CAMB .dat file.
+    lmax : int
+        Truncate spectra to this lmax.
     
     Returns
     -------
@@ -105,12 +114,28 @@ def get_cmb_spectra(spectra_filepath, lmax):
 
 def get_combined_cmb_spectrum(r_tensor, A_lens, cov_scalar_ell, cov_tensor_ell):
     '''
-    
+    Given r and A_lens, combine scalar and tensor constributions.
+
+    Parameters
+    ----------
+    r_tensor : float
+        Tensor-to-scalar ratio.
+    A_lens : float
+        A_lens parameter.
+    cov_scalar_ell : (npol, npol, nell) array
+        Scalar cls.
+    cov_tensor_ell : (npol, npol, nell) array
+        Tensor cls.
+
+    Returns
+    -------
+    cov_tot_ell : (npol, npol, nell) array
+        Combined spectrum.
     
     Notes
     -----
-    This is an approximation.
-
+    This is an approximation. In reality, a nonzero r will also change the shape
+    of the TT, TE, EE spectra. 
     '''
 
     return A_lens * cov_scalar_ell + r_tensor * cov_tensor_ell
@@ -125,7 +150,7 @@ def get_sed_dust(freq, beta, temp, freq_pivot):
     freq : float
         Effective freq of passband in Hz.    
     beta : float
-    
+        
     temp : float
 
     freq_pivot : float
@@ -147,21 +172,153 @@ def get_ell_shape(lmax, alpha, ell_pivot=80):
 
     Parameters
     ----------
-    
+    lmax : int
+        Maximum multipole.
+    alpha : float
+        Power law index.
+    ell_pivot : int, optional
+        Pivot multipole.
+
+    Returns
+    -------
+    out : (nell) array
+        Power law.
     '''
 
-    #out = jnp.zeros((lmax + 1))
-    #ells = jnp.arange(2, lmax + 1)
+    out = jnp.zeros((lmax + 1))
+    ells = jnp.arange(2, lmax + 1)
     
     #out = out.at[2:].set((ells / ell_pivot) ** (alpha + 2))
 
-    out = np.zeros((lmax + 1))
-    ells = np.arange(2, lmax + 1)
+    #out = np.zeros((lmax + 1))
+    #ells = np.arange(2, lmax + 1)
     dells = ells * (ells + 1) / 2 / np.pi
-    
-    out[2:] = (ells / ell_pivot) ** (alpha + 2) / dells
+
+    #out[2:] = (ells / ell_pivot) ** (alpha + 2) / dells
+    out = out.at[2:].set((ells / ell_pivot) ** (alpha + 2) / dells)
 
     return out
+
+# def bin_spectrum_core(spec, ells, bins, lmin, lmax):
+#     '''
+
+#     arr : (n) array
+    
+#     bins : (nbin + 1) array
+#         Output bins. Specify the rightmost edge. Sorted.
+
+#     '''
+
+#     bounds = jnp.asarray(lmin, lmax)
+#     idxs = jnp.searchsorted(bins, bounds)
+#     bins_ext = jnp.insert(bins, idxs, bounds)
+    
+#     bins_kept = jnp.where((lmin <= bins) & (bins <= lmax), bins_ext)
+
+#     return jnp.histogram(
+#         spec, bins_kept, weights=spec)[0] / jnp.histogram(spec, bins_kept)[0]
+    
+def bin_spectrum(spec, ells, bins, lmin, lmax, use_jax=False):
+    '''
+    Bin input spectra.
+    
+    Parameters
+    ----------
+    spec : (..., lmax + 1)
+        Input spectra.
+    ells :
+        Multipole array corresponding to the spectra.
+    bins : (nbin + 1) array
+        Output bins. Specify the rightmost edge.
+    lmin : int
+        Do not use multipoles below lmin.
+    lmax : int
+        Do not use multipoles below lmax.    
+    
+    Returns
+    -------
+    spec_binned : (nbin) array
+       Binned output. 
+    '''
+
+    preshape = spec.shape[:-1]
+    
+    if use_jax:
+        out = jnp.zeros(preshape + (bins.size - 1,))    
+    else:        
+        out = np.zeros(preshape + (bins.size - 1,))
+        
+    for idxs in np.ndindex(preshape):
+
+        if use_jax:
+            out = out.at[idxs].set(
+                jnp.histogram(ells, bins=bins, range=(lmin, lmax+1), weights=spec[idxs])[0] /
+                jnp.histogram(ells, bins=bins, range=(lmin, lmax+1))[0])
+        else:
+            out[idxs] = binned_statistic(ells, spec[idxs], bins=bins, range=(lmin, lmax+1))[0]
+        
+    return out
+
+def get_dust_spectra(amp, alpha, lmax, freqs, beta, temp, freq_pivot):
+    '''
+    Compute dust cross-spectra in CMB temperature.
+    
+    Parameters
+    ----------
+    amp : float
+        Amplitude
+    alpha : float
+        Multipole power law index.
+    bins : (nbin + 1) array
+        Output bins. Specify the rightmost edge.
+    lmax : int
+        Maximum multipole.
+    freqs : (nfreq) array
+        Effective frequencies of bands.
+    beta : float
+    temp : float
+        Dust temperature
+    freq_pivot : float
+        Frequency pivot scale.
+    
+    Returns
+    -------
+    out : (nfreq, nfreq, nbin) array
+        Cross spectra.
+    '''
+    
+    nfreq = len(freqs)
+    
+    #out = np.zeros((nfreq, nfreq, lmax+1))
+    #out[:] = get_ell_shape(lmax, alpha)[np.newaxis,:]
+
+    out = jnp.zeros((nfreq, nfreq, lmax+1))
+    out = out.at[:].set(get_ell_shape(lmax, alpha)[jnp.newaxis,:])
+    
+    for fidx1 in range(nfreq):
+        
+        f1_factor = get_sed_dust(freqs[fidx1], beta, temp, freq_pivot)
+        g1_factor = get_g_fact(freqs[fidx1])
+        
+        for fidx2 in range(nfreq):
+        
+            f2_factor = get_sed_dust(freqs[fidx2], beta, temp, freq_pivot)
+            g2_factor = get_g_fact(freqs[fidx2])
+            
+            #out[fidx1,fidx2] *= amp * np.sqrt(f1_factor * f2_factor) \
+            #    * g1_factor * g2_factor
+            out = out.at[fidx1,fidx2].multiply(amp * jnp.sqrt(f1_factor * f2_factor) \
+                * g1_factor * g2_factor)
+            
+    return out
+
+
+
+
+
+
+
+
     
 def get_sed_sync(freq, beta, freq_pivot):
     '''
@@ -178,42 +335,6 @@ def get_sed_sync(freq, beta, freq_pivot):
     '''
 
     return (freq / freq_pivot) ** (2 * beta)
-
-def get_dust_spectra(amp, alpha, lmax, freq, beta, temp, freq_pivot):
-    '''
-    Compute dust spectrum in antenna temperature.
-    
-    Parameters
-    ----------
-    amp : float
-        Amplitude
-    alpha : float
-        Multipole power law index.
-    lmax : int
-        Max multipole.
-    freq : float
-        Effective frequency of band.
-    beta : float
-    temp : float
-        Dust temperature
-    freq_pivot : float
-        Frequency pivot scale.
-    
-    Returns
-    -------
-    out : (nell) array
-    '''
-    
-    f_factor = get_sed_dust(freq, beta, temp, freq_pivot)
-
-    #out = jnp.zeros((lmax + 1))
-    #ells = jnp.arange(2, lmax + 1)
-
-    prefactor = amp * f_factor
-
-    out = get_ell_shape(lmax, alpha) * prefactor
-    
-    return out
 
 def get_sync_spectra(amp, alpha, lmax, freq, beta, freq_pivot):
     '''
@@ -242,8 +363,6 @@ def get_sync_spectra(amp, alpha, lmax, freq, beta, freq_pivot):
 
     prefactor = amp * f_factor
 
-    #ell_pivot = 80
-    #out = out.at[2:].set(prefactor * (ells / ell_pivot) ** (alpha + 2))
     out = get_ell_shape(lmax, alpha) * prefactor
     
     return out
@@ -277,14 +396,3 @@ def get_fg_spectra(A_d_EE, alpha_d_EE, alpha_d_BB, beta_dust, nu0_dust, temp_dus
     out = out.at[:].multiply(g_factor ** 2)
     
     return out
-
-def get_combined_spectrum(params, cov_scalar_ell, cov_tensor_ell):
-    '''
-    
-    '''
-
-    lmax = cov_scalar_ell.shape[-1] - 1
-
-    #c_ell = get_combined_
-
-    pass

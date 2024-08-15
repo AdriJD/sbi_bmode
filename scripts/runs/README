@@ -1,0 +1,10 @@
+run00	Testing run_sbi_basic.py
+run01	Testing run_sbi_basic.py after fixing rng seed bug
+run02	like run01 but with sequential
+run03	like run01 but with a_d_BB prior width =2 instead of 5
+run04	like run03 but sequential
+run05	like run04 but with more sims
+run06	sequential with wider prior for A_lens (0.3 instead of 0.1)
+run07	Like run06 but with only cross-spectra
+run08	like run07 but with config08 (smaller data vector)
+checkcov00    check analytic cov with Monte-Carlo
