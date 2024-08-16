@@ -159,10 +159,13 @@ def main(odir, config, specdir, data_file, seed, n_samples, n_chains):
                      frac_tune1=0.4, frac_tune2=0.1, frac_tune3=0.1)
 
     print(logdens(mean))
-    print(jax.grad(logdens)(mean))
+    
+    print('before sampler')
     
     samples = sampler.sample(n_samples, num_chains=n_chains)
 
+    print('after sampler')
+    
     samples = samples.reshape(n_samples * n_chains, -1)
     print(samples)
     mean = jnp.mean(samples, axis=0)

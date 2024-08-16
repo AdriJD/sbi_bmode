@@ -255,10 +255,7 @@ def get_diff(data, model, tri_indices):
 
     diff = jnp.zeros_like(data)
 
-    print(data.shape)
-    
     for idx, (sidx1, fidx1, sidx2, fidx2) in enumerate(tri_indices):
-        #diff[idx] = data[idx] - model[fidx1,fidx2]
 
         diff = diff.at[idx].set(data[idx] - model[fidx1,fidx2])
 

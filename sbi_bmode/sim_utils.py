@@ -27,7 +27,7 @@ class CMBSimulator():
         Path to pyilc respository. Setting to None means NILC is not used.
     '''
     
-    def __init__(self, specdir, data_dict, fixed_params_dict, pyilcdir, odir):
+    def __init__(self, specdir, data_dict, fixed_params_dict, pyilcdir=None, odir=None):
 
         self.lmax = data_dict['lmax']
         self.lmin = data_dict['lmin']
