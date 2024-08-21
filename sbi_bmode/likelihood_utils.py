@@ -17,18 +17,17 @@ class Normal():
         Standard deviation of distribution.
     '''
     
-    def __init__(self, mean, sigma, halfnormal=False):
+    def __init__(self, mean, sigma):
 
         self.mean = mean
         self.sigma = sigma
-        self.halfnormal = halfnormal
 
         if halfnormal:
             assert self.mean == 0.
         
     def log_prob(self, param):                
         '''
-        Evalute unnormalized Gaussian log prior.
+        Evaluate unnormalized Gaussian log prior.
 
         Parameters
         ----------
@@ -52,14 +51,58 @@ class Normal():
         '''
 
         draw = self.sigma * jax.random.normal(key)
-
-        if self.halfnormal:
-            draw = jnp.abs(draw)
-        else:
-            draw = draw + self.mean
+        draw = draw + self.mean
 
         return draw
-        
+
+class HalfNormal():
+    '''
+    One-dimensional halfnormal distributions 
+
+    Parameters
+    ----------
+    sigma : float
+        Standard deviation of distribution.
+    '''
+    
+    def __init__(self, sigma, halfnormal=False):
+
+        self.mean = mean
+
+    @property
+    def sigma(self):
+        return self.sigma * sqrt(2 / np.pi)
+            
+    def log_prob(self, param):                
+        '''
+        Evaluate unnormalized Gaussian log prior.
+
+        Parameters
+        ----------
+        param : float or array
+            Return the log probability for this parameter value.
+    
+        Returns
+        -------
+        logprob : float
+            The log probability.
+        '''
+    
+        return -0.5 * jnp.sum((param / self.sigma) ** 2)
+
+    def sample(self, key):
+        '''
+        Draw sample from distribution.
+
+        Returns
+        -------
+        '''
+
+        draw = self.sigma * jax.random.normal(key)
+        draw = jnp.abs(draw)
+
+        return draw
+    
 class MultipleIndependent():
     '''
     Wrap sequence of one-dimensional distributions into a

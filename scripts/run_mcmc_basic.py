@@ -48,8 +48,8 @@ def get_prior(params_dict):
             bounds.append((None, None))
             
         elif prior_dict['prior_type'].lower() == 'halfnormal':
-            prior.append(likelihood_utils.Normal(
-                0., *prior_dict['prior_params'], halfnormal=True))
+            prior.append(likelihood_utils.HalfNormal(
+                *prior_dict['prior_params']))
             bounds.append((0., None))
             
         else:
@@ -85,13 +85,22 @@ def main(odir, config, specdir, data_file, seed, n_samples, n_chains):
     # Get covariance matrix
     print(param_names)
 
-    mean_dict = {}
-    for idx, name in enumerate(param_names):
-        mean_dict[name] = mean[idx]
-    
+    # mean_dict = {}
+    # for idx, name in enumerate(param_names):
+    #     mean_dict[name] = mean[idx]
+
+    # signal_spectra = cmb_simulator.get_signal_spectra(
+    #     mean_dict['r_tensor'], mean_dict['A_lens'], mean_dict['A_d_BB'],
+    #     mean_dict['alpha_d_BB'], mean_dict['beta_dust'])
+                
+    # NOTE actually better if we use the true parameters for the fiducial spectrum.
+    true_params = {}
+    for param_name, pd in params_dict.items():
+        true_params[param_name] = pd['true_value']    
+
     signal_spectra = cmb_simulator.get_signal_spectra(
-        mean_dict['r_tensor'], mean_dict['A_lens'], mean_dict['A_d_BB'],
-        mean_dict['alpha_d_BB'], mean_dict['beta_dust'])
+        true_params['r_tensor'], true_params['A_lens'], true_params['A_d_BB'],
+        true_params['alpha_d_BB'], true_params['beta_dust'])
 
     #def get_signal_spectra(self, r_tensor, A_lens, A_d_BB, alpha_d_BB, beta_dust):        
 

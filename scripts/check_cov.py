@@ -125,12 +125,10 @@ def main(odir, config, specdir, seed):
     comm.Gatherv(sendbuf=sims_per_rank, recvbuf=(recvbuf, sendcounts), root=0)
     
     if comm.rank == 0:
-
                
         sims = recvbuf.reshape(-1,  cmb_simulator.size_data)
         
         cov_mc = np.cov(sims.T)
-
 
         tri_indices = sim_utils.get_tri_indices(cmb_simulator.nsplit, cmb_simulator.nfreq)
         cov_ext = np.ones((tri_indices.shape[0], tri_indices.shape[0], cov.shape[-1], cov.shape[-1]))

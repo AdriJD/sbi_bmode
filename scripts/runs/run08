@@ -31,8 +31,8 @@ do
     for n_train in 50000
     do    
 	#srun -u --cpu-bind=cores -c $SLURM_CPUS_PER_TASK python ${ANADIR}/run_sbi_basic.py --odir ${ODIR} --specdir ${SPECDIR} --r_true ${r_true} --n_train ${n_train} --seed -1 --n_samples 10000 --n_rounds 3
-	#srun -u -n 40 python ${ANADIR}/run_sbi_basic.py --odir ${ODIR} --config ${CONFIG} --specdir ${SPECDIR} --r_true ${r_true} --n_train ${n_train} --n_samples 10000 --n_rounds 1 # --n_rounds 3
-	srun -u -n 1 python ${ANADIR}/run_mcmc_basic.py --odir ${ODIR} --config ${CONFIG} --specdir ${SPECDIR} --data ${ODIR}/data.npy --n_samples 50000 --n_chains 10
+	srun -u -n 1 python ${ANADIR}/run_sbi_basic.py --odir ${ODIR} --config ${CONFIG} --specdir ${SPECDIR} --r_true ${r_true} --n_train ${n_train} --n_samples 10000 --n_rounds 1 # --n_rounds 3
+	#srun -u -n 1 python ${ANADIR}/run_mcmc_basic.py --odir ${ODIR} --config ${CONFIG} --specdir ${SPECDIR} --data ${ODIR}/data.npy --n_samples 50000 --n_chains 10
 
     done
 done

@@ -194,6 +194,8 @@ def main(odir, config, specdir, r_true, seed, n_train, n_samples, n_rounds, pyil
     prior, param_names = get_prior(params_dict)
     prior, num_parameters, prior_returns_numpy = process_prior(prior)
 
+    print(f'{prior.mean=}')
+    
     cmb_simulator = sim_utils.CMBSimulator(specdir, data_dict, fixed_params_dict, pyilcdir, odir)
 
     if r_true is not None:

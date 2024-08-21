@@ -94,8 +94,6 @@ class CMBSimulator():
             self.freq_pivot_dust)
 
         # Only adding the BB part because `get_dust_spectra` only produces BB.
-        #cov_ell += spectra_utils.get_combined_cmb_spectrum(
-        #    r_tensor, A_lens, self.cov_scalar_ell, self.cov_tensor_ell)[1,1]
         cov_ell = cov_ell.at[:].add(spectra_utils.get_combined_cmb_spectrum(
             r_tensor, A_lens, self.cov_scalar_ell, self.cov_tensor_ell)[1,1])
 
@@ -114,8 +112,7 @@ class CMBSimulator():
             Noise frequency cross spectra.        
         '''
 
-        out = np.zeros((self.nfreq, self.nfreq, self.lmax+1))
-                
+        out = np.zeros((self.nfreq, self.nfreq, self.lmax+1))                
         out[:] = np.eye(self.nfreq)[:,:,np.newaxis] * self.noise_cov_ell[:,1,1]
 
         cov_bin = spectra_utils.bin_spectrum(
@@ -172,11 +169,11 @@ class CMBSimulator():
                                                 so_utils.sat_central_freqs, so_utils.sat_beam_fwhms,
                                                 output_dir=self.odir, remove_files=True, debug=False)
             spectra = estimate_spectra_nilc(nilc_maps, self.minfo, self.ainfo)
-            data = get_final_data_vector(spectra, self.bins, self.lmin, self.lmax)
         
         else:
             spectra = estimate_spectra(omap, self.minfo, self.ainfo)
-            data = get_final_data_vector(spectra, self.bins, self.lmin, self.lmax)
+            
+        data = get_final_data_vector(spectra, self.bins, self.lmin, self.lmax)
 
         return data
 
