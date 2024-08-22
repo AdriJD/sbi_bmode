@@ -251,7 +251,10 @@ def main(odir, config, specdir, r_true, seed, n_train, n_samples, n_rounds, pyil
             pickle.dump(posterior, handle)
         samples = posterior.sample((n_samples,), x=x_obs)
         np.save(opj(odir, 'samples.npy'), samples)
-        np.save(opj(odir, 'data.npy'), x_obs)        
+        if norm_params:            
+            np.save(opj(odir, 'data.npy'), cmb_simulator.get_unnorm_data(x_obs))
+        else:
+            np.save(opj(odir, 'data.npy'), x_obs)                    
         with open(opj(odir, 'config.yaml'), "w") as handle:  
             yaml.safe_dump(config, handle)
         

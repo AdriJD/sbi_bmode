@@ -83,7 +83,8 @@ class CMBSimulator():
             norm_cov = likelihood_utils.get_cov(
                 self.norm_model, noise_spectra, self.bins, self.lmin,
                 self.lmax, self.nsplit, self.nfreq)
-            self.isqrt_norm_cov = mat_utils.matpow(norm_cov, -0.5, return_diag=True)
+            self.sqrt_norm_cov = mat_utils.matpow(norm_cov, 0.5, return_diag=True)
+            self.isqrt_norm_cov = mat_utils.matpow(norm_cov, -0.5, return_diag=True)            
                     
     def get_signal_spectra(self, r_tensor, A_lens, A_d_BB, alpha_d_BB, beta_dust):
         '''
@@ -190,15 +191,59 @@ class CMBSimulator():
         data = get_final_data_vector(spectra, self.bins, self.lmin, self.lmax)
 
         if self.norm_params:
-            ntri = get_ntri(self.nsplit, self.nfreq)
-            tri_indices = get_tri_indices(self.nsplit, self.nfreq)
-            data = likelihood_utils.get_diff(
-                data.reshape(ntri, -1), self.norm_model, tri_indices)
-            data = np.einsum('ijk, jk -> ik', self.isqrt_norm_cov, data)
-            data = data.reshape(-1)
+            data = self.get_norm_data(data)
             
         return data
 
+    def get_norm_data(self, data):
+        '''
+        Subtract mean and multiply by inverse sqrt of covariance.
+
+        Parameters
+        ----------
+        data : (ndata) array
+            Input data.
+        
+        Returns
+        -------
+        data_norm : (ndata) array
+            Normalized data.
+        '''
+        
+        ntri = get_ntri(self.nsplit, self.nfreq)
+        tri_indices = get_tri_indices(self.nsplit, self.nfreq)
+        data = likelihood_utils.get_diff(
+            data.reshape(ntri, -1), self.norm_model, tri_indices)
+        data = np.einsum('ijk, jk -> ik', self.isqrt_norm_cov, data)
+        data = data.reshape(-1)
+
+        return data
+
+    def get_unnorm_data(self, data_norm):
+        '''
+        Subtract mean and multiply by inverse sqrt of covariance.
+
+        Parameters
+        ----------
+        data_norm : (ndata) array
+            Nomalized data.
+        
+        Returns
+        -------
+        data : (ndata) array
+            Unnormalized data.
+        '''
+        
+        ntri = get_ntri(self.nsplit, self.nfreq)
+        tri_indices = get_tri_indices(self.nsplit, self.nfreq)
+        data = np.einsum(
+            'ijk, jk -> ik', self.sqrt_norm_cov, data_norm.reshape(ntri, -1))
+        data = likelihood_utils.get_diff(
+            data, -self.norm_model, tri_indices)
+        data = data.reshape(-1)
+
+        return data
+    
 def gen_data(A_d_BB, alpha_d_BB, beta_dust, freq_pivot_dust, temp_dust,
              r_tensor, A_lens, freqs, seed, nsplit, cov_noise_ell,
              cov_scalar_ell, cov_tensor_ell, minfo, ainfo):

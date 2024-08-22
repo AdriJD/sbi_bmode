@@ -135,8 +135,8 @@ def main(odir, config, specdir, data_file, seed, n_samples, n_chains):
         
         logprior = prior_combined.log_prob(params)
 
-        jax.debug.print('{x}', x=params)
-        jax.debug.print('loglike : {x}, logprior : {y}', x=-loglike, y=-logprior)
+        #jax.debug.print('{x}', x=params)
+        #jax.debug.print('loglike : {x}, logprior : {y}', x=-loglike, y=-logprior)
         
         return -(loglike + logprior)
         
