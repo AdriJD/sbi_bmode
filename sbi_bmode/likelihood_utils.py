@@ -21,9 +21,6 @@ class Normal():
 
         self.mean = mean
         self.sigma = sigma
-
-        if halfnormal:
-            assert self.mean == 0.
         
     def log_prob(self, param):                
         '''
@@ -67,11 +64,11 @@ class HalfNormal():
     
     def __init__(self, sigma, halfnormal=False):
 
-        self.mean = mean
+        self.sigma = sigma
 
     @property
-    def sigma(self):
-        return self.sigma * sqrt(2 / np.pi)
+    def mean(self):
+        return self.sigma * jnp.sqrt(2 / jnp.pi)
             
     def log_prob(self, param):                
         '''

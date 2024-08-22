@@ -195,8 +195,18 @@ def main(odir, config, specdir, r_true, seed, n_train, n_samples, n_rounds, pyil
     prior, num_parameters, prior_returns_numpy = process_prior(prior)
 
     print(f'{prior.mean=}')
-    
-    cmb_simulator = sim_utils.CMBSimulator(specdir, data_dict, fixed_params_dict, pyilcdir, odir)
+    mean_dict = {}
+    for idx, name in enumerate(param_names):
+        mean_dict[name] = float(prior.mean[idx])
+        
+    if not pyilcdir:
+        # Not implemented this yet for NILC case.
+        norm_params = mean_dict
+    else:
+        norm_params = None
+        
+    cmb_simulator = sim_utils.CMBSimulator(
+        specdir, data_dict, fixed_params_dict, pyilcdir, odir, norm_params=mean_dict)    
 
     if r_true is not None:
         params_dict['r_tensor']['true_value'] = r_true
@@ -221,7 +231,7 @@ def main(odir, config, specdir, r_true, seed, n_train, n_samples, n_rounds, pyil
         theta, x = simulate_for_sbi_mpi(
             cmb_simulator, proposal, param_names, n_train, cmb_simulator.size_data,
             rng_sims, comm)
-
+ 
         if comm.rank == 0:
 
             density_estimator = inference.append_simulations(

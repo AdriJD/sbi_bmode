@@ -7,13 +7,12 @@ import os
 import numpy as np
 import healpy as hp
 from pixell import curvedsky
-from optweight import alm_utils, sht, map_utils
+from optweight import alm_utils, sht, map_utils, mat_utils
 import healpy as hp
 
-from sbi_bmode import spectra_utils, so_utils, nilc_utils
+from sbi_bmode import spectra_utils, so_utils, nilc_utils, likelihood_utils
 
 opj = os.path.join
-
 
 class CMBSimulator():
     '''
@@ -27,8 +26,12 @@ class CMBSimulator():
         Path to pyilc respository. Setting to None means NILC is not used.
     '''
     
-    def __init__(self, specdir, data_dict, fixed_params_dict, pyilcdir=None, odir=None):
+    def __init__(self, specdir, data_dict, fixed_params_dict, pyilcdir=None, odir=None,
+                 norm_params=None):
 
+        if pyilcdir and norm_params:
+            raise ValueError("not implemented yet")
+        
         self.lmax = data_dict['lmax']
         self.lmin = data_dict['lmin']
         self.nside = data_dict['nside']
@@ -71,6 +74,17 @@ class CMBSimulator():
         self.freq_pivot_dust = fixed_params_dict['freq_pivot_dust']
         self.temp_dust = fixed_params_dict['temp_dust']
 
+        self.norm_params = norm_params
+        if self.norm_params:            
+            self.norm_model = np.asarray(self.get_signal_spectra(
+                norm_params['r_tensor'], norm_params['A_lens'], norm_params['A_d_BB'],
+                norm_params['alpha_d_BB'], norm_params['beta_dust']))
+            noise_spectra = self.get_noise_spectra()
+            norm_cov = likelihood_utils.get_cov(
+                self.norm_model, noise_spectra, self.bins, self.lmin,
+                self.lmax, self.nsplit, self.nfreq)
+            self.isqrt_norm_cov = mat_utils.matpow(norm_cov, -0.5, return_diag=True)
+                    
     def get_signal_spectra(self, r_tensor, A_lens, A_d_BB, alpha_d_BB, beta_dust):
         '''
         Generate binned signal frequency cross spectra.
@@ -175,6 +189,14 @@ class CMBSimulator():
             
         data = get_final_data_vector(spectra, self.bins, self.lmin, self.lmax)
 
+        if self.norm_params:
+            ntri = get_ntri(self.nsplit, self.nfreq)
+            tri_indices = get_tri_indices(self.nsplit, self.nfreq)
+            data = likelihood_utils.get_diff(
+                data.reshape(ntri, -1), self.norm_model, tri_indices)
+            data = np.einsum('ijk, jk -> ik', self.isqrt_norm_cov, data)
+            data = data.reshape(-1)
+            
         return data
 
 def gen_data(A_d_BB, alpha_d_BB, beta_dust, freq_pivot_dust, temp_dust,
@@ -289,6 +311,7 @@ def apply_obsmatrix(imap, obs_matrix):
 
     return reobs_imap
 
+# Move to spectra_utils?
 def get_ntri(nsplit, nfreq):
     '''
     Get the number of elements in the upper triangle of the
@@ -309,6 +332,7 @@ def get_ntri(nsplit, nfreq):
 
     return nfreq * nfreq * (nsplit * (nsplit - 1) // 2)
 
+# Move to spectra_utils?
 def get_tri_indices(nsplit, nfreq):
     '''
     Get indices into upper-triangular part of the
