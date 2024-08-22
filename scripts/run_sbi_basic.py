@@ -228,12 +228,16 @@ def main(odir, config, specdir, r_true, seed, n_train, n_samples, n_rounds, pyil
     # Train the SNPE
     for _ in range(n_rounds):
 
+        #torch.set_num_threads(1)        
+        
         theta, x = simulate_for_sbi_mpi(
             cmb_simulator, proposal, param_names, n_train, cmb_simulator.size_data,
             rng_sims, comm)
  
         if comm.rank == 0:
 
+            #torch.set_num_threads(40)
+            
             density_estimator = inference.append_simulations(
                 theta, x, proposal=proposal
             ).train(show_train_summary=True)

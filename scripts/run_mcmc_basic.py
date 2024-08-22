@@ -102,8 +102,6 @@ def main(odir, config, specdir, data_file, seed, n_samples, n_chains):
         true_params['r_tensor'], true_params['A_lens'], true_params['A_d_BB'],
         true_params['alpha_d_BB'], true_params['beta_dust'])
 
-    #def get_signal_spectra(self, r_tensor, A_lens, A_d_BB, alpha_d_BB, beta_dust):        
-
     noise_spectra = cmb_simulator.get_noise_spectra()
     cov = likelihood_utils.get_cov(
         np.asarray(signal_spectra), noise_spectra, cmb_simulator.bins, cmb_simulator.lmin,
@@ -137,8 +135,8 @@ def main(odir, config, specdir, data_file, seed, n_samples, n_chains):
         
         logprior = prior_combined.log_prob(params)
 
-        #jax.debug.print('{x}', x=params)
-        #jax.debug.print('{x}', x=-(loglike + logprior))
+        jax.debug.print('{x}', x=params)
+        jax.debug.print('loglike : {x}, logprior : {y}', x=-loglike, y=-logprior)
         
         return -(loglike + logprior)
         
@@ -168,6 +166,7 @@ def main(odir, config, specdir, data_file, seed, n_samples, n_chains):
                      frac_tune1=0.4, frac_tune2=0.1, frac_tune3=0.1)
 
     print(logdens(mean))
+    print(logdens(mean + 100))    
     
     print('before sampler')
     

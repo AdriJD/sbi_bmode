@@ -65,10 +65,11 @@ class HalfNormal():
     def __init__(self, sigma, halfnormal=False):
 
         self.sigma = sigma
-
+        
     @property
     def mean(self):
         return self.sigma * jnp.sqrt(2 / jnp.pi)
+
             
     def log_prob(self, param):                
         '''
@@ -84,7 +85,7 @@ class HalfNormal():
         logprob : float
             The log probability.
         '''
-    
+
         return -0.5 * jnp.sum((param / self.sigma) ** 2)
 
     def sample(self, key):
@@ -308,7 +309,6 @@ def loglike(model, data, icov, tri_indices):
     '''
 
     # IS FORWARD MODEL JUST GET_SIGNAL_SPECTRA?
-    #model = forward_model(params)
     diff = get_diff(data, model, tri_indices)
     return -0.5 * jnp.einsum('al, abl, bl', diff, icov, diff)
 
