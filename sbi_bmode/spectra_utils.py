@@ -1,5 +1,5 @@
 '''
-Utilities to generate simple Gaussian CMB + FG spectra.
+Utilities to generate simple Gaussian CMB + FG spectra. Mostly jax.
 '''
 import os
 import argparse as ap
@@ -57,7 +57,6 @@ def get_planck_law(freq, temp):
     xx = hk_ratio * (freq / temp)
 
     return b0 * temp * xx ** 3 / jnp.expm1(xx)
-    #return b0 * temp * xx ** 3 / np.expm1(xx)
 
 def get_g_fact(freq, temp=cmb_temp):
     '''
@@ -80,7 +79,6 @@ def get_g_fact(freq, temp=cmb_temp):
     xx = hk_ratio * (freq / temp)
 
     return (jnp.expm1(xx) ** 2) / (xx ** 2 * jnp.exp(xx))
-    #return (np.expm1(xx) ** 2) / (xx ** 2 * np.exp(xx))
 
 def get_cmb_spectra(spectra_filepath, lmax):
     '''    
@@ -187,37 +185,12 @@ def get_ell_shape(lmax, alpha, ell_pivot=80):
 
     out = jnp.zeros((lmax + 1))
     ells = jnp.arange(2, lmax + 1)
-    
-    #out = out.at[2:].set((ells / ell_pivot) ** (alpha + 2))
-
-    #out = np.zeros((lmax + 1))
-    #ells = np.arange(2, lmax + 1)
     dells = ells * (ells + 1) / 2 / np.pi
 
-    #out[2:] = (ells / ell_pivot) ** (alpha + 2) / dells
     out = out.at[2:].set((ells / ell_pivot) ** (alpha + 2) / dells)
 
     return out
 
-# def bin_spectrum_core(spec, ells, bins, lmin, lmax):
-#     '''
-
-#     arr : (n) array
-    
-#     bins : (nbin + 1) array
-#         Output bins. Specify the rightmost edge. Sorted.
-
-#     '''
-
-#     bounds = jnp.asarray(lmin, lmax)
-#     idxs = jnp.searchsorted(bins, bounds)
-#     bins_ext = jnp.insert(bins, idxs, bounds)
-    
-#     bins_kept = jnp.where((lmin <= bins) & (bins <= lmax), bins_ext)
-
-#     return jnp.histogram(
-#         spec, bins_kept, weights=spec)[0] / jnp.histogram(spec, bins_kept)[0]
-    
 def bin_spectrum(spec, ells, bins, lmin, lmax, use_jax=False):
     '''
     Bin input spectra.
@@ -289,9 +262,6 @@ def get_dust_spectra(amp, alpha, lmax, freqs, beta, temp, freq_pivot):
     
     nfreq = len(freqs)
     
-    #out = np.zeros((nfreq, nfreq, lmax+1))
-    #out[:] = get_ell_shape(lmax, alpha)[np.newaxis,:]
-
     out = jnp.zeros((nfreq, nfreq, lmax+1))
     out = out.at[:].set(get_ell_shape(lmax, alpha)[jnp.newaxis,:])
     
@@ -304,9 +274,7 @@ def get_dust_spectra(amp, alpha, lmax, freqs, beta, temp, freq_pivot):
         
             f2_factor = get_sed_dust(freqs[fidx2], beta, temp, freq_pivot)
             g2_factor = get_g_fact(freqs[fidx2])
-            
-            #out[fidx1,fidx2] *= amp * np.sqrt(f1_factor * f2_factor) \
-            #    * g1_factor * g2_factor
+
             out = out.at[fidx1,fidx2].multiply(amp * jnp.sqrt(f1_factor * f2_factor) \
                 * g1_factor * g2_factor)
             

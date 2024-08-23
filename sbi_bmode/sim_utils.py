@@ -176,7 +176,8 @@ class CMBSimulator():
             for split in range(self.nsplit):
                 for f, freq_str in enumerate(self.freq_strings):
                     Q, U = omap[split, f]
-                    alm_T, alm_E, alm_B = hp.map2alm([np.zeros_like(Q), Q, U], pol=True) #alm_T is just a placeholder
+                    # alm_T is just a placeholder                    
+                    alm_T, alm_E, alm_B = hp.map2alm([np.zeros_like(Q), Q, U], pol=True) 
                     B_maps[split, f] = 10**(-6)*hp.alm2map(alm_B, self.nside)
             map_tmpdir = nilc_utils.write_maps(B_maps, output_dir=self.odir)
             nilc_maps = nilc_utils.get_nilc_maps(self.pyilcdir, map_tmpdir, self.nsplit, self.nside, 
@@ -356,7 +357,6 @@ def apply_obsmatrix(imap, obs_matrix):
 
     return reobs_imap
 
-# Move to spectra_utils?
 def get_ntri(nsplit, nfreq):
     '''
     Get the number of elements in the upper triangle of the
@@ -377,7 +377,6 @@ def get_ntri(nsplit, nfreq):
 
     return nfreq * nfreq * (nsplit * (nsplit - 1) // 2)
 
-# Move to spectra_utils?
 def get_tri_indices(nsplit, nfreq):
     '''
     Get indices into upper-triangular part of the
