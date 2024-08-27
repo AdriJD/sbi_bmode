@@ -17,6 +17,8 @@ from sbi.utils.user_input_checks import (
     process_prior,
     process_simulator,
 )
+from sbi.neural_nets.embedding_nets import FCEmbedding
+from sbi.neural_nets import posterior_nn
 
 import sys
 sys.path.append('..')
@@ -151,7 +153,8 @@ def get_true_params(params_dict):
 
     return true_params
 
-def main(odir, config, specdir, r_true, seed, n_train, n_samples, n_rounds, pyilcdir):
+def main(odir, config, specdir, r_true, seed, n_train, n_samples, n_rounds, pyilcdir,
+         embed=False):
     '''
     Run SBI.
 
@@ -175,6 +178,8 @@ def main(odir, config, specdir, r_true, seed, n_train, n_samples, n_rounds, pyil
         Number of simulation rounds, if 1: NPE, if >1, SNPE.
     pyilcdir: str
         Path to pyilc repository. If None, nilc not performed.
+    embed : bool, optional
+        Use an embedding network.
     '''
 
     # Seed SBI. Annoyingly, this is using a bunch of global seeds. Every rank
@@ -222,22 +227,29 @@ def main(odir, config, specdir, r_true, seed, n_train, n_samples, n_rounds, pyil
         x_obs = None
     x_obs = comm.bcast(x_obs, root=0)
 
-    inference = SNPE(prior)
-    proposal = prior
-
+    # NOTE ADDED
+    if embed:
+        embedding_net = FCEmbedding(
+           input_dim=x_obs.size,
+           output_dim=5,
+           num_layers=2,
+           num_hiddens=25
+        )
+        neural_posterior = posterior_nn(model="maf", embedding_net=embedding_net)
+        inference = SNPE(prior=prior, density_estimator=neural_posterior)
+    else:
+        inference = SNPE(prior)
+        proposal = prior
+    
     # Train the SNPE
     for _ in range(n_rounds):
 
-        #torch.set_num_threads(1)        
-        
         theta, x = simulate_for_sbi_mpi(
             cmb_simulator, proposal, param_names, n_train, cmb_simulator.size_data,
             rng_sims, comm)
  
         if comm.rank == 0:
 
-            #torch.set_num_threads(40)
-            
             density_estimator = inference.append_simulations(
                 theta, x, proposal=proposal
             ).train(show_train_summary=True)
@@ -276,9 +288,6 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
 
-    #subdirname = 'r%.2e_s%d_nt%d_ns%d_nr%d' % (args.r_true, args.seed, args.n_train,
-    #                                           args.n_samples, args.n_rounds)
-    #odir = opj(args.odir, subdirname)
     odir = args.odir
     if comm.rank == 0:
         os.makedirs(odir, exist_ok=True)

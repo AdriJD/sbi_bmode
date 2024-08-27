@@ -419,8 +419,10 @@ def get_tri_indices(nsplit, nfreq):
 
 def estimate_spectra(imap, minfo, ainfo):
     '''
-    Compute all the auto and cross-spectra between splits and
-    and frequency bands. NOTE Right now EE, EB are discarded.
+    Compute all the cross-spectra between splits and
+    and frequency bands. NOTE Right now EE, EB are discarded and
+    all spectra that involve two maps of the same splits are also
+    discarded.
 
     Parameters
     ----------

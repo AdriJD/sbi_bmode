@@ -237,8 +237,6 @@ def get_cov_prefactor(bins, lmin, lmax):
 
     ells = np.arange(lmax+1)
     num_modes = (2 * ells + 1)
-    #num_modes_per_bin = spectra_utils.bin_spectrum(num_modes, ells, bins, lmin, lmax)
-
     num_modes_per_bin = binned_statistic(
         ells, num_modes, bins=bins, range=(lmin, lmax+1), statistic='sum')[0]
     
