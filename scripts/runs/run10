@@ -1,5 +1,5 @@
 #!/bin/bash
-##SBATCH --job-name=run08
+##SBATCH --job-name=run10
 ##SBATCH --partition=gen
 ##SBATCH --constraint=rome
 ##SBATCH --nodes=1
