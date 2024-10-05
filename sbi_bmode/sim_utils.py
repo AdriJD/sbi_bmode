@@ -9,6 +9,8 @@ import healpy as hp
 from pixell import curvedsky
 from optweight import alm_utils, sht, map_utils, mat_utils
 import healpy as hp
+from jax import grad
+import jax.numpy as jnp
 
 from sbi_bmode import spectra_utils, so_utils, nilc_utils, likelihood_utils
 
@@ -27,7 +29,7 @@ class CMBSimulator():
     '''
     
     def __init__(self, specdir, data_dict, fixed_params_dict, pyilcdir=None, odir=None,
-                 norm_params=None):
+                 norm_params=None, score_params=None):
 
         if pyilcdir and norm_params:
             raise ValueError("not implemented yet")
@@ -75,7 +77,8 @@ class CMBSimulator():
         self.temp_dust = fixed_params_dict['temp_dust']
 
         self.norm_params = norm_params
-        if self.norm_params:            
+        if self.norm_params:
+            
             self.norm_model = np.asarray(self.get_signal_spectra(
                 norm_params['r_tensor'], norm_params['A_lens'], norm_params['A_d_BB'],
                 norm_params['alpha_d_BB'], norm_params['beta_dust']))
@@ -85,7 +88,38 @@ class CMBSimulator():
                 self.lmax, self.nsplit, self.nfreq)
             self.sqrt_norm_cov = mat_utils.matpow(norm_cov, 0.5, return_diag=True)
             self.isqrt_norm_cov = mat_utils.matpow(norm_cov, -0.5, return_diag=True)            
-                    
+
+        self.score_params = score_params
+        if self.score_params:
+            
+            if self.score_params and self.norm_params:
+                raise ValueError('Cannot have both norm_params and score_params')
+            
+            self.score_model = np.asarray(self.get_signal_spectra(
+                score_params['r_tensor'], score_params['A_lens'], score_params['A_d_BB'],
+                score_params['alpha_d_BB'], score_params['beta_dust']))
+            noise_spectra = self.get_noise_spectra()
+            cov = likelihood_utils.get_cov(
+                self.score_model, noise_spectra, self.bins, self.lmin,
+                self.lmax, self.nsplit, self.nfreq)
+            tri_indices = get_tri_indices(self.nsplit, self.nfreq)
+            icov = mat_utils.matpow(cov, -1, return_diag=True)
+            
+            score_params_arr = jnp.asarray(
+                [score_params['r_tensor'], score_params['A_lens'], score_params['A_d_BB'],
+		 score_params['alpha_d_BB'], score_params['beta_dust']])
+            
+            def get_loglike(params, data):
+
+                data = data.reshape(tri_indices.shape[0], -1)
+                model = self.get_signal_spectra(*params)
+                loglike = likelihood_utils.loglike(model, data, icov, tri_indices)
+
+                return loglike
+                
+            grad_logdens = grad(get_loglike, argnums=0)
+            self.score_compress = lambda x: grad_logdens(score_params_arr, x)
+            
     def get_signal_spectra(self, r_tensor, A_lens, A_d_BB, alpha_d_BB, beta_dust):
         '''
         Generate binned signal frequency cross spectra.

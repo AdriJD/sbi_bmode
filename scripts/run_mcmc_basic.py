@@ -84,14 +84,6 @@ def main(odir, config, specdir, data_file, seed, n_samples, n_chains):
 
     # Get covariance matrix
     print(param_names)
-
-    # mean_dict = {}
-    # for idx, name in enumerate(param_names):
-    #     mean_dict[name] = mean[idx]
-
-    # signal_spectra = cmb_simulator.get_signal_spectra(
-    #     mean_dict['r_tensor'], mean_dict['A_lens'], mean_dict['A_d_BB'],
-    #     mean_dict['alpha_d_BB'], mean_dict['beta_dust'])
                 
     # NOTE actually better if we use the true parameters for the fiducial spectrum.
     true_params = {}
@@ -113,19 +105,10 @@ def main(odir, config, specdir, data_file, seed, n_samples, n_chains):
     # Init sampler
     key = jax.random.key(seed)
 
-    #print(mean)
-    #print(prior_combined.sample(key))
-    #key, subkey = jax.random.split(key)
-    #print(prior_combined.sample(key))    
-
     tri_indices = sim_utils.get_tri_indices(cmb_simulator.nsplit, cmb_simulator.nfreq)
 
     data = data.reshape(tri_indices.shape[0], -1)
 
-    # NOTE
-    #icov = jnp.ones((tri_indices.shape[0], tri_indices.shape[0], data.shape[-1])) * jnp.eye(tri_indices.shape[0])[:,:,None]
-
-    
     def logdens(params):
 
         params = norm2real(params)
@@ -135,9 +118,6 @@ def main(odir, config, specdir, data_file, seed, n_samples, n_chains):
         
         logprior = prior_combined.log_prob(params)
 
-        #jax.debug.print('{x}', x=params)
-        #jax.debug.print('loglike : {x}, logprior : {y}', x=-loglike, y=-logprior)
-        
         return -(loglike + logprior)
         
     class BSampler():
@@ -152,7 +132,6 @@ def main(odir, config, specdir, data_file, seed, n_samples, n_chains):
 
         def prior_draw(self, key):
 
-            #return prior_combined.sample(key)
             return real2norm(prior_combined.sample(key))
 
     target = BSampler(mean.size)

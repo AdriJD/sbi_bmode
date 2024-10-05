@@ -59,7 +59,8 @@ def get_prior(params_dict):
     # sbi needs the distributions to not be scalar.
     return [p.expand(torch.Size([1])) for p in prior], param_names
     
-def simulate_for_sbi_mpi(simulator, proposal, param_names, num_sims, ndata, seed, comm):
+def simulate_for_sbi_mpi(simulator, proposal, param_names, num_sims, ndata, seed, comm,
+                         score_compress):
     '''
     Draw parameters from proposal and simulate data.
     
@@ -79,6 +80,8 @@ def simulate_for_sbi_mpi(simulator, proposal, param_names, num_sims, ndata, seed
         Seed or random number generator object.
     comm : mpi4py.MPI.Intracomm object
         MPI communicator.
+    score_compress : bool
+        Apply score compression.
     
     Returns
     -------
@@ -101,11 +104,16 @@ def simulate_for_sbi_mpi(simulator, proposal, param_names, num_sims, ndata, seed
     for idx, theta in enumerate(thetas):
 
         theta_dict = dict(zip(param_names, theta))
-        sims[idx] = simulator.draw_data(
+
+        draw = simulator.draw_data(
             r_tensor=theta_dict['r_tensor'], A_lens=theta_dict['A_lens'],
             A_d_BB=theta_dict['A_d_BB'], alpha_d_BB=theta_dict['alpha_d_BB'],
             beta_dust=theta_dict['beta_dust'], seed=seed)
 
+        if score_compress:
+            draw = simulator.score_compress(draw)
+        sims[idx] = draw
+        
     if comm.rank == 0:
         thetas_full = np.zeros(num_sims * ntheta, dtype=np.float64)
         sims_full = np.zeros(num_sims * ndata, dtype=np.float64)
@@ -154,7 +162,8 @@ def get_true_params(params_dict):
     return true_params
 
 def main(odir, config, specdir, r_true, seed, n_train, n_samples, n_rounds, pyilcdir,
-         embed=False):
+         no_norm=False, score_compress=False, embed=False, embed_num_layers=2,
+         embed_num_hiddens=25):
     '''
     Run SBI.
 
@@ -178,8 +187,16 @@ def main(odir, config, specdir, r_true, seed, n_train, n_samples, n_rounds, pyil
         Number of simulation rounds, if 1: NPE, if >1, SNPE.
     pyilcdir: str
         Path to pyilc repository. If None, nilc not performed.
+    no_norm : bool, optional
+        Apply no normalization to the data vector.
+    score_compress : bool, optional
+        Apply score-compression to the data.
     embed : bool, optional
         Use an embedding network.
+    embed_num_layers : int, optional
+        Number of layers of embedding network
+    embed_num_hiddens : int, optional
+        Number of features in each hidden layer.
     '''
 
     # Seed SBI. Annoyingly, this is using a bunch of global seeds. Every rank
@@ -198,25 +215,38 @@ def main(odir, config, specdir, r_true, seed, n_train, n_samples, n_rounds, pyil
     data_dict, fixed_params_dict, params_dict = script_utils.parse_config(config)
     prior, param_names = get_prior(params_dict)
     prior, num_parameters, prior_returns_numpy = process_prior(prior)
-
+    
     print(f'{prior.mean=}')
     mean_dict = {}
     for idx, name in enumerate(param_names):
         mean_dict[name] = float(prior.mean[idx])
         
-    if not pyilcdir:
-        # Not implemented this yet for NILC case.
+    if not pyilcdir and not no_norm:
         norm_params = mean_dict
-    else:
-        norm_params = None
         
-    cmb_simulator = sim_utils.CMBSimulator(
-        specdir, data_dict, fixed_params_dict, pyilcdir, odir, norm_params=mean_dict)    
+    else:
+        # Not implemented yet for NILC case.
+        norm_params = None
 
     if r_true is not None:
         params_dict['r_tensor']['true_value'] = r_true
     true_params = get_true_params(params_dict)
         
+    if score_compress:
+        # For now, compute the score around the true parameter values.
+        score_params = true_params
+    else:
+        score_params = None    
+
+    cmb_simulator = sim_utils.CMBSimulator(
+        specdir, data_dict, fixed_params_dict, pyilcdir, odir, norm_params=norm_params,
+        score_params=score_params)    
+
+    if score_compress:
+        data_size = num_parameters
+    else:
+        data_size = cmb_simulator.size_data        
+    
     # Define observations. Important that all ranks agree on this.
     if comm.rank == 0:                
         x_obs = cmb_simulator.draw_data(
@@ -227,32 +257,40 @@ def main(odir, config, specdir, r_true, seed, n_train, n_samples, n_rounds, pyil
         x_obs = None
     x_obs = comm.bcast(x_obs, root=0)
 
-    # NOTE ADDED
+    x_obs_full = x_obs.copy() # We always want to save the full data vector.
+    if score_compress:
+        x_obs = np.asarray(cmb_simulator.score_compress(x_obs))
+    if comm.rank == 0:
+        print(f'{x_obs.size=}')
+    
     if embed:
         embedding_net = FCEmbedding(
            input_dim=x_obs.size,
-           output_dim=5,
-           num_layers=2,
-           num_hiddens=25
-        )
+           output_dim=num_parameters,
+           num_layers=embed_num_layers,
+           num_hiddens=embed_num_hiddens)
         neural_posterior = posterior_nn(model="maf", embedding_net=embedding_net)
         inference = SNPE(prior=prior, density_estimator=neural_posterior)
     else:
-        inference = SNPE(prior)
-        proposal = prior
+        inference = SNPE(prior, density_estimator='maf')
+
+    proposal = prior
     
-    # Train the SNPE
+    # Train the SNPE.
     for _ in range(n_rounds):
 
         theta, x = simulate_for_sbi_mpi(
-            cmb_simulator, proposal, param_names, n_train, cmb_simulator.size_data,
-            rng_sims, comm)
- 
+            cmb_simulator, proposal, param_names, n_train, data_size,
+            rng_sims, comm, score_compress)
+
         if comm.rank == 0:
 
+            print(x)
+            
             density_estimator = inference.append_simulations(
-                theta, x, proposal=proposal
+                theta, x, proposal=proposal,
             ).train(show_train_summary=True)
+
             posterior = inference.build_posterior(density_estimator)
             proposal = posterior.set_default_x(x_obs)
             
@@ -266,7 +304,7 @@ def main(odir, config, specdir, r_true, seed, n_train, n_samples, n_rounds, pyil
         if norm_params:            
             np.save(opj(odir, 'data.npy'), cmb_simulator.get_unnorm_data(x_obs))
         else:
-            np.save(opj(odir, 'data.npy'), x_obs)                    
+            np.save(opj(odir, 'data.npy'), x_obs_full)            
         with open(opj(odir, 'config.yaml'), "w") as handle:  
             yaml.safe_dump(config, handle)
         
@@ -278,7 +316,8 @@ if __name__ == '__main__':
     parser.add_argument('--odir')
     parser.add_argument('--config', help="Path to config yaml file.")
     parser.add_argument('--specdir')
-    parser.add_argument('--pyilcdir', default=None, help="Path to pyilc repository. Set to None to use multifrequency PS instead of NILC PS.")
+    parser.add_argument('--pyilcdir', default=None, help="Path to pyilc repository. "\
+                        "Set to None to use multifrequency PS instead of NILC PS.")
     parser.add_argument('--r_true', type=float, default=None, help="True value of r.")
     parser.add_argument('--seed', type=int, default=225186655513525153114758457104258967436,
                         help="Random seed for the training data.")
@@ -286,10 +325,23 @@ if __name__ == '__main__':
     parser.add_argument('--n_samples', type=int, default=10000, help="samples of posterior")
     parser.add_argument('--n_rounds', type=int, default=1, help="number of sequential rounds")
 
+    parser.add_argument('--score-compress', action='store_true',
+                        help="Compress data vector with score compression")
+    parser.add_argument('--no-norm', action='store_true', help="Do not normalize the data vector")
+    parser.add_argument('--embed', action='store_true',
+                        help="Estimate and apply embedding (compression) network")
+    parser.add_argument('--embed-num-layers', type=int, default=2,
+                        help="Number of layers in embedding nework")
+    parser.add_argument('--embed-num-hiddens', type=int, default=25,
+                        help="Number of hidden units in each layer of the embedding network")
+    
     args = parser.parse_args()
 
     odir = args.odir
     if comm.rank == 0:
+        
+        print(f'Running with {comm.size} MPI rank(s)')
+        
         os.makedirs(odir, exist_ok=True)
         with open(args.config, 'r') as yfile:
             config = yaml.safe_load(yfile)
@@ -298,4 +350,6 @@ if __name__ == '__main__':
     config = comm.bcast(config, root=0)        
 
     main(odir, config, args.specdir, args.r_true, args.seed, args.n_train,
-         args.n_samples, args.n_rounds, args.pyilcdir)
+         args.n_samples, args.n_rounds, args.pyilcdir, no_norm=args.no_norm,
+         score_compress=args.score_compress, embed=args.embed,
+         embed_num_layers=args.embed_num_layers, embed_num_hiddens=args.embed_num_hiddens)

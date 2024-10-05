@@ -9,6 +9,7 @@ run07	Like run06 but with only cross-spectra
 run08	like run07 but with config08 (smaller data vector)
 run09	like run07 but with config09 (slighly smaller data vector)
 run10	like run09 but with config10 (Different true values (not centered on prior mean))
+run11	like run09 but with score compression
 
 
 
