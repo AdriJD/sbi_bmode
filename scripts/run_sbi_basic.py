@@ -223,9 +223,9 @@ def main(odir, config, specdir, r_true, seed, n_train, n_samples, n_rounds, pyil
         
     if not pyilcdir and not no_norm:
         norm_params = mean_dict
-        
+    elif pyilcdir and not no_norm:
+        norm_params = True
     else:
-        # Not implemented yet for NILC case.
         norm_params = None
 
     if r_true is not None:
@@ -301,8 +301,9 @@ def main(odir, config, specdir, r_true, seed, n_train, n_samples, n_rounds, pyil
             pickle.dump(posterior, handle)
         samples = posterior.sample((n_samples,), x=x_obs)
         np.save(opj(odir, 'samples.npy'), samples)
-        if norm_params:            
-            np.save(opj(odir, 'data.npy'), cmb_simulator.get_unnorm_data(x_obs))
+        if norm_params: 
+            simple = True if pyilcdir is not None else False           
+            np.save(opj(odir, 'data.npy'), cmb_simulator.get_unnorm_data(x_obs, simple=simple))
         else:
             np.save(opj(odir, 'data.npy'), x_obs_full)            
         with open(opj(odir, 'config.yaml'), "w") as handle:  
@@ -319,7 +320,7 @@ if __name__ == '__main__':
     parser.add_argument('--pyilcdir', default=None, help="Path to pyilc repository. "\
                         "Set to None to use multifrequency PS instead of NILC PS.")
     parser.add_argument('--r_true', type=float, default=None, help="True value of r.")
-    parser.add_argument('--seed', type=int, default=225186655513525153114758457104258967436,
+    parser.add_argument('--seed', type=int, default=0,
                         help="Random seed for the training data.")
     parser.add_argument('--n_train', type=int, default=1000, help="training samples for SNPE")
     parser.add_argument('--n_samples', type=int, default=10000, help="samples of posterior")

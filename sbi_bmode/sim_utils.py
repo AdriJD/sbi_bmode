@@ -20,7 +20,7 @@ class CMBSimulator():
     '''
     Generate CMB data vectors and power spectra.
 
-    Paramaters
+    Parameters
     ----------
     specdir : str
         Path to data directory containing power spectrum files.
@@ -30,9 +30,6 @@ class CMBSimulator():
     
     def __init__(self, specdir, data_dict, fixed_params_dict, pyilcdir=None, odir=None,
                  norm_params=None, score_params=None):
-
-        if pyilcdir and norm_params:
-            raise ValueError("not implemented yet")
         
         self.lmax = data_dict['lmax']
         self.lmin = data_dict['lmin']
@@ -77,7 +74,7 @@ class CMBSimulator():
         self.temp_dust = fixed_params_dict['temp_dust']
 
         self.norm_params = norm_params
-        if self.norm_params:
+        if self.norm_params and pyilcdir is None:
             
             self.norm_model = np.asarray(self.get_signal_spectra(
                 norm_params['r_tensor'], norm_params['A_lens'], norm_params['A_d_BB'],
@@ -87,8 +84,8 @@ class CMBSimulator():
                 self.norm_model, noise_spectra, self.bins, self.lmin,
                 self.lmax, self.nsplit, self.nfreq)
             self.sqrt_norm_cov = mat_utils.matpow(norm_cov, 0.5, return_diag=True)
-            self.isqrt_norm_cov = mat_utils.matpow(norm_cov, -0.5, return_diag=True)            
-
+            self.isqrt_norm_cov = mat_utils.matpow(norm_cov, -0.5, return_diag=True)  
+            
         self.score_params = score_params
         if self.score_params:
             
@@ -226,11 +223,12 @@ class CMBSimulator():
         data = get_final_data_vector(spectra, self.bins, self.lmin, self.lmax)
 
         if self.norm_params:
-            data = self.get_norm_data(data)
+            simple = True if self.pyilcdir is not None else False
+            data = self.get_norm_data(data, simple=simple)
             
         return data
 
-    def get_norm_data(self, data):
+    def get_norm_data(self, data, simple=False):
         '''
         Subtract mean and multiply by inverse sqrt of covariance.
 
@@ -238,23 +236,28 @@ class CMBSimulator():
         ----------
         data : (ndata) array
             Input data.
+        simple: Bool, if True, subtracts mean and divides by sqrt(var) for each element
         
         Returns
         -------
         data_norm : (ndata) array
             Normalized data.
         '''
-        
+        if simple:
+            if not hasattr(self, 'data_mean'):
+                self.data_mean = np.mean(data, axis=0)
+                self.data_std = np.std(data, axis=0)
+            data_norm = (data-self.data_mean)/self.data_std
+            return data_norm
         ntri = get_ntri(self.nsplit, self.nfreq)
         tri_indices = get_tri_indices(self.nsplit, self.nfreq)
         data = likelihood_utils.get_diff(
             data.reshape(ntri, -1), self.norm_model, tri_indices)
         data = np.einsum('ijk, jk -> ik', self.isqrt_norm_cov, data)
-        data = data.reshape(-1)
+        data_norm = data.reshape(-1)
+        return data_norm
 
-        return data
-
-    def get_unnorm_data(self, data_norm):
+    def get_unnorm_data(self, data_norm, simple=False):
         '''
         Subtract mean and multiply by inverse sqrt of covariance.
 
@@ -262,13 +265,17 @@ class CMBSimulator():
         ----------
         data_norm : (ndata) array
             Nomalized data.
+        simple: Bool, if True, norm computed by subtracting mean and dividing
+                 by sqrt(var) for each element
         
         Returns
         -------
         data : (ndata) array
             Unnormalized data.
         '''
-        
+        if simple:
+            data = data_norm * self.data_std + self.data_mean
+            return data
         ntri = get_ntri(self.nsplit, self.nfreq)
         tri_indices = get_tri_indices(self.nsplit, self.nfreq)
         data = np.einsum(
