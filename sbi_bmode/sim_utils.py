@@ -24,12 +24,23 @@ class CMBSimulator():
     ----------
     specdir : str
         Path to data directory containing power spectrum files.
+    data_dict:
+    fixed_params_dict:
     pyilcdir: str
         Path to pyilc respository. Setting to None means NILC is not used.
+    use_dbeta_map: Bool
+        Only relevant if using nilc (pyilc dir is not None). Whether
+        to build map of first moment w.r.t. beta and include it in
+        auto- and cross-spectra in the data vector
+    odir: str
+        Path to output directory
+    norm_params: 
+    score_params: 
+
     '''
     
-    def __init__(self, specdir, data_dict, fixed_params_dict, pyilcdir=None, odir=None,
-                 norm_params=None, score_params=None):
+    def __init__(self, specdir, data_dict, fixed_params_dict, pyilcdir=None, use_dbeta_map=False,
+                 odir=None, norm_params=None, score_params=None):
         
         self.lmax = data_dict['lmax']
         self.lmin = data_dict['lmin']
@@ -37,6 +48,7 @@ class CMBSimulator():
         self.nsplit = data_dict['nsplit']        
         self.delta_ell = data_dict['delta_ell']
         self.pyilcdir = pyilcdir
+        self.use_dbeta_map = use_dbeta_map
         self.odir = odir
         self.bins = np.arange(self.lmin, self.lmax, self.delta_ell)
 
@@ -52,7 +64,7 @@ class CMBSimulator():
         self.freqs = [so_utils.sat_central_freqs[fstr] for fstr in self.freq_strings]
         self.nfreq = len(self.freqs)
         if pyilcdir:
-            self.ncomp = 2
+            self.ncomp = 2 if not self.use_dbeta_map else 3
             self.size_data = get_ntri(self.nsplit, self.ncomp) * (self.bins.size - 1)
         else:
             self.size_data = get_ntri(self.nsplit, self.nfreq) * (self.bins.size - 1)
@@ -214,7 +226,7 @@ class CMBSimulator():
             nilc_maps = nilc_utils.get_nilc_maps(self.pyilcdir, map_tmpdir, self.nsplit, self.nside, 
                                                 beta_dust, self.temp_dust, self.freq_pivot_dust, 
                                                 so_utils.sat_central_freqs, so_utils.sat_beam_fwhms,
-                                                output_dir=self.odir, remove_files=True, debug=False)
+                                                use_dbeta_map=self.use_dbeta_map, output_dir=self.odir, remove_files=True, debug=False)
             spectra = estimate_spectra_nilc(nilc_maps, self.minfo, self.ainfo)
         
         else:

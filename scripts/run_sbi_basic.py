@@ -161,7 +161,7 @@ def get_true_params(params_dict):
 
     return true_params
 
-def main(odir, config, specdir, r_true, seed, n_train, n_samples, n_rounds, pyilcdir,
+def main(odir, config, specdir, r_true, seed, n_train, n_samples, n_rounds, pyilcdir, use_dbeta_map,
          no_norm=False, score_compress=False, embed=False, embed_num_layers=2,
          embed_num_hiddens=25):
     '''
@@ -187,6 +187,10 @@ def main(odir, config, specdir, r_true, seed, n_train, n_samples, n_rounds, pyil
         Number of simulation rounds, if 1: NPE, if >1, SNPE.
     pyilcdir: str
         Path to pyilc repository. If None, nilc not performed.
+    use_dbeta_map: Bool
+        Only relevant if using nilc (pyilc dir is not None). Whether
+        to build map of first moment w.r.t. beta and include it in
+        auto- and cross-spectra in the data vector
     no_norm : bool, optional
         Apply no normalization to the data vector.
     score_compress : bool, optional
@@ -239,7 +243,7 @@ def main(odir, config, specdir, r_true, seed, n_train, n_samples, n_rounds, pyil
         score_params = None    
 
     cmb_simulator = sim_utils.CMBSimulator(
-        specdir, data_dict, fixed_params_dict, pyilcdir, odir, norm_params=norm_params,
+        specdir, data_dict, fixed_params_dict, pyilcdir, use_dbeta_map, odir, norm_params=norm_params,
         score_params=score_params)    
 
     if score_compress:
@@ -319,6 +323,8 @@ if __name__ == '__main__':
     parser.add_argument('--specdir')
     parser.add_argument('--pyilcdir', default=None, help="Path to pyilc repository. "\
                         "Set to None to use multifrequency PS instead of NILC PS.")
+    parser.add_argument('--use_dbeta_map', default=False, help="Whether to build map of \
+                        1st moment w.r.t. beta. Only relevant if usng NILC PS.")
     parser.add_argument('--r_true', type=float, default=None, help="True value of r.")
     parser.add_argument('--seed', type=int, default=0,
                         help="Random seed for the training data.")
@@ -351,6 +357,6 @@ if __name__ == '__main__':
     config = comm.bcast(config, root=0)        
 
     main(odir, config, args.specdir, args.r_true, args.seed, args.n_train,
-         args.n_samples, args.n_rounds, args.pyilcdir, no_norm=args.no_norm,
+         args.n_samples, args.n_rounds, args.pyilcdir, args.use_dbeta_map, no_norm=args.no_norm,
          score_compress=args.score_compress, embed=args.embed,
          embed_num_layers=args.embed_num_layers, embed_num_hiddens=args.embed_num_hiddens)
