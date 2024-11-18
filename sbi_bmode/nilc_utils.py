@@ -109,7 +109,7 @@ def get_nilc_maps(pyilc_path, map_tmpdir, nsplit, nside, beta_dust, temp_dust, f
         #Dump CMB and dust yaml files
         comps = ['CMB', 'dust']
         if use_dbeta_map:
-            comps.append(['dbeta'])
+            comps.append('dbeta')
         all_yaml_files = [f'{nilc_tmpdir}/split{split}_{comp}_preserved.yml' for comp in comps]
         for c, comp in enumerate(comps):
             with open(all_yaml_files[c], 'w') as outfile:
