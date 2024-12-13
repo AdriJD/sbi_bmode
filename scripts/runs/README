@@ -10,7 +10,8 @@ run08	like run07 but with config08 (smaller data vector)
 run09	like run07 but with config09 (slighly smaller data vector)
 run10	like run09 but with config10 (Different true values (not centered on prior mean))
 run11	like run09 but with score compression
-
-
+run12	test run with pyilc and config09, 2000 sims
+run13	like run12 but with neural network compression
+run14 	like run12 but with 6000 sims
 
 checkcov00    check analytic cov with Monte-Carl

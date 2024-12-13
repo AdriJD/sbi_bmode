@@ -102,7 +102,7 @@ def simulate_for_sbi_mpi(simulator, proposal, param_names, num_sims, ndata, seed
     sims = np.zeros((num_sims_per_rank[comm.rank], ndata))
 
     for idx, theta in enumerate(thetas):
-
+        print(comm.rank, idx)
         theta_dict = dict(zip(param_names, theta))
 
         draw = simulator.draw_data(
