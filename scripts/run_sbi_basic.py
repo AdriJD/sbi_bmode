@@ -22,7 +22,7 @@ from sbi.neural_nets import posterior_nn, flowmatching_nn
 
 import sys
 sys.path.append('..')
-from sbi_bmode import sim_utils, script_utils
+from sbi_bmode import sim_utils, script_utils, compress_utils
 
 opj = os.path.join
 comm = MPI.COMM_WORLD
@@ -60,7 +60,7 @@ def get_prior(params_dict):
     return [p.expand(torch.Size([1])) for p in prior], param_names
     
 def simulate_for_sbi_mpi(simulator, proposal, param_names, num_sims, ndata, seed, comm,
-                         score_compress):
+                         score_compress, mat_compress=None):
     '''
     Draw parameters from proposal and simulate data.
     
@@ -82,6 +82,8 @@ def simulate_for_sbi_mpi(simulator, proposal, param_names, num_sims, ndata, seed
         MPI communicator.
     score_compress : bool
         Apply score compression.
+    mat_compress : (ntheta, ndata) array, optional
+        Apply this compression matrix to the data vectors.    
     
     Returns
     -------
@@ -102,7 +104,7 @@ def simulate_for_sbi_mpi(simulator, proposal, param_names, num_sims, ndata, seed
     sims = np.zeros((num_sims_per_rank[comm.rank], ndata))
 
     for idx, theta in enumerate(thetas):
-        print(comm.rank, idx)
+        #print(comm.rank, idx)
         theta_dict = dict(zip(param_names, theta))
 
         draw = simulator.draw_data(
@@ -110,6 +112,8 @@ def simulate_for_sbi_mpi(simulator, proposal, param_names, num_sims, ndata, seed
             A_d_BB=theta_dict['A_d_BB'], alpha_d_BB=theta_dict['alpha_d_BB'],
             beta_dust=theta_dict['beta_dust'], seed=seed)
 
+        if mat_compress is not None:
+            draw = np.dot(mat_compress, draw)
         if score_compress:
             draw = simulator.score_compress(draw)
         sims[idx] = draw
@@ -163,7 +167,7 @@ def get_true_params(params_dict):
 
 def main(odir, config, specdir, r_true, seed, n_train, n_samples, n_rounds, pyilcdir, use_dbeta_map,
          no_norm=False, score_compress=False, embed=False, embed_num_layers=2,
-         embed_num_hiddens=25, fmpe=False):
+         embed_num_hiddens=25, fmpe=False, e_moped=False, n_moped=None):
     '''
     Run SBI.
 
@@ -201,10 +205,17 @@ def main(odir, config, specdir, r_true, seed, n_train, n_samples, n_rounds, pyil
         Number of layers of embedding network
     embed_num_hiddens : int, optional
         Number of features in each hidden layer.
-    fmpe : bool
+    fmpe : bool, optional
         Use Flow-Matching Posterior Estimation.
+    e_moped : bool, optional
+        Use e-MOPED compression for the data vector.
+    n_moped : int, optional
+        Number of simulations used for e-MOPED compression matrix.
     '''
 
+    if score_compress and e_moped:
+        raise ValueError("Cannot have both score and e-MOPED compression.")
+    
     # Seed SBI. Annoyingly, this is using a bunch of global seeds. Every rank
     # gets a unique global seed.
     if comm.rank == 0:
@@ -212,7 +223,7 @@ def main(odir, config, specdir, r_true, seed, n_train, n_samples, n_rounds, pyil
         seed_per_rank = seed_global.spawn(comm.size)
     else:
         seed_per_rank = None
-
+            
     seed_per_rank = comm.scatter(seed_per_rank, root=0)
     # Per rank create one rng for SBI backend and one for drawing simulations.
     rng_sbi, rng_sims = [np.random.default_rng(s) for s in seed_per_rank.spawn(2)]
@@ -248,11 +259,8 @@ def main(odir, config, specdir, r_true, seed, n_train, n_samples, n_rounds, pyil
         specdir, data_dict, fixed_params_dict, pyilcdir, use_dbeta_map, odir, norm_params=norm_params,
         score_params=score_params)    
 
-    if score_compress:
-        data_size = num_parameters
-    else:
-        data_size = cmb_simulator.size_data        
-    
+    proposal = prior
+
     # Define observations. Important that all ranks agree on this.
     if comm.rank == 0:                
         x_obs = cmb_simulator.draw_data(
@@ -262,10 +270,27 @@ def main(odir, config, specdir, r_true, seed, n_train, n_samples, n_rounds, pyil
     else:
         x_obs = None
     x_obs = comm.bcast(x_obs, root=0)
-
+    
+    mat_compress = None    
+    if e_moped:        
+        # Draw some simulations from the prior to estimate the compression matrix.
+        theta, x = simulate_for_sbi_mpi(
+            cmb_simulator, proposal, param_names, n_moped, cmb_simulator.size_data,
+            rng_sims, comm, score_compress)
+        if comm.rank == 0:
+            mat_compress = compress_utils.get_e_moped_matrix(x.numpy(), theta.numpy())
+        mat_compress = comm.bcast(mat_compress, root=0)            
+        data_size = num_parameters        
+    elif score_compress:
+        data_size = num_parameters
+    else:
+        data_size = cmb_simulator.size_data        
+    
     x_obs_full = x_obs.copy() # We always want to save the full data vector.
+    if e_moped:
+        x_obs = np.dot(mat_compress, x_obs)
     if score_compress:
-        x_obs = np.asarray(cmb_simulator.score_compress(x_obs))
+        x_obs = np.asarray(cmb_simulator.score_compress(x_obs))        
     if comm.rank == 0:
         print(f'{x_obs.size=}')
     
@@ -287,14 +312,11 @@ def main(odir, config, specdir, r_true, seed, n_train, n_samples, n_rounds, pyil
     else:
         inference = SNPE(prior, density_estimator='maf')
 
-    proposal = prior
-    
     # Train the SNPE.
     for _ in range(n_rounds):
-
         theta, x = simulate_for_sbi_mpi(
             cmb_simulator, proposal, param_names, n_train, data_size,
-            rng_sims, comm, score_compress)
+            rng_sims, comm, score_compress, mat_compress=mat_compress)
 
         if comm.rank == 0:
 
@@ -306,7 +328,7 @@ def main(odir, config, specdir, r_true, seed, n_train, n_samples, n_rounds, pyil
             else:
                 density_estimator = inference.append_simulations(
                     theta, x, proposal=proposal,
-                ).train(show_train_summary=True)
+                ).train(show_train_summary=True, use_combined_loss=True)
                 
             posterior = inference.build_posterior(density_estimator)
             proposal = posterior.set_default_x(x_obs)
@@ -355,12 +377,16 @@ if __name__ == '__main__':
     parser.add_argument('--embed-num-hiddens', type=int, default=25,
                         help="Number of hidden units in each layer of the embedding network")
     parser.add_argument('--fmpe', action='store_true', help="Use Flow-Matching Posterior Estimation.")
+    parser.add_argument('--e-moped', action='store_true', help="Use e-MOPED to compress the data vector")
+    parser.add_argument('--n-moped', type=int, help="Number of sims used to estimate e-moped matrix",
+                        default=1000)    
     
     args = parser.parse_args()
 
     odir = args.odir
     if comm.rank == 0:
         
+        print(f'Running with arguments: {args}')        
         print(f'Running with {comm.size} MPI rank(s)')
         
         os.makedirs(odir, exist_ok=True)
@@ -374,4 +400,4 @@ if __name__ == '__main__':
          args.n_samples, args.n_rounds, args.pyilcdir, args.use_dbeta_map, no_norm=args.no_norm,
          score_compress=args.score_compress, embed=args.embed,
          embed_num_layers=args.embed_num_layers, embed_num_hiddens=args.embed_num_hiddens,
-         fmpe=args.fmpe)
+         fmpe=args.fmpe, e_moped=args.e_moped, n_moped=args.n_moped)
