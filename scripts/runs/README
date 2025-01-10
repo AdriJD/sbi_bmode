@@ -13,5 +13,8 @@ run11	like run09 but with score compression
 run12	test run with pyilc and config09, 2000 sims
 run13	like run12 but with neural network compression
 run14 	like run12 but with 6000 sims
+run15	like run12 but with 2000 sims?
+run16	like run12 but with FMPE
+run17	like run16 but with 3-rounds FMPE
 
 checkcov00    check analytic cov with Monte-Carl

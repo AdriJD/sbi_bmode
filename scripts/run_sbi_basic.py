@@ -10,7 +10,7 @@ from pixell import curvedsky
 from optweight import map_utils
 import torch
 from torch.distributions import Normal, HalfNormal
-from sbi.inference import SNPE, simulate_for_sbi
+from sbi.inference import SNPE, simulate_for_sbi, FMPE
 from sbi.utils.sbiutils import seed_all_backends
 from sbi.utils.user_input_checks import (
     check_sbi_inputs,
@@ -18,7 +18,7 @@ from sbi.utils.user_input_checks import (
     process_simulator,
 )
 from sbi.neural_nets.embedding_nets import FCEmbedding
-from sbi.neural_nets import posterior_nn
+from sbi.neural_nets import posterior_nn, flowmatching_nn
 
 import sys
 sys.path.append('..')
@@ -163,7 +163,7 @@ def get_true_params(params_dict):
 
 def main(odir, config, specdir, r_true, seed, n_train, n_samples, n_rounds, pyilcdir, use_dbeta_map,
          no_norm=False, score_compress=False, embed=False, embed_num_layers=2,
-         embed_num_hiddens=25):
+         embed_num_hiddens=25, fmpe=False):
     '''
     Run SBI.
 
@@ -201,6 +201,8 @@ def main(odir, config, specdir, r_true, seed, n_train, n_samples, n_rounds, pyil
         Number of layers of embedding network
     embed_num_hiddens : int, optional
         Number of features in each hidden layer.
+    fmpe : bool
+        Use Flow-Matching Posterior Estimation.
     '''
 
     # Seed SBI. Annoyingly, this is using a bunch of global seeds. Every rank
@@ -275,6 +277,13 @@ def main(odir, config, specdir, r_true, seed, n_train, n_samples, n_rounds, pyil
            num_hiddens=embed_num_hiddens)
         neural_posterior = posterior_nn(model="maf", embedding_net=embedding_net)
         inference = SNPE(prior=prior, density_estimator=neural_posterior)
+    elif fmpe:
+        net_builder = flowmatching_nn(
+            model="resnet",
+            num_blocks=3,
+            hidden_features=24
+        )
+        inference = FMPE(prior, density_estimator=net_builder)
     else:
         inference = SNPE(prior, density_estimator='maf')
 
@@ -290,11 +299,15 @@ def main(odir, config, specdir, r_true, seed, n_train, n_samples, n_rounds, pyil
         if comm.rank == 0:
 
             print(x)
-            
-            density_estimator = inference.append_simulations(
-                theta, x, proposal=proposal,
-            ).train(show_train_summary=True)
-
+            if fmpe:            
+                density_estimator = inference.append_simulations(
+                    theta, x, proposal=proposal,
+                ).train(show_train_summary=True, training_batch_size=200, learning_rate=5e-4)
+            else:
+                density_estimator = inference.append_simulations(
+                    theta, x, proposal=proposal,
+                ).train(show_train_summary=True)
+                
             posterior = inference.build_posterior(density_estimator)
             proposal = posterior.set_default_x(x_obs)
             
@@ -341,6 +354,7 @@ if __name__ == '__main__':
                         help="Number of layers in embedding nework")
     parser.add_argument('--embed-num-hiddens', type=int, default=25,
                         help="Number of hidden units in each layer of the embedding network")
+    parser.add_argument('--fmpe', action='store_true', help="Use Flow-Matching Posterior Estimation.")
     
     args = parser.parse_args()
 
@@ -359,4 +373,5 @@ if __name__ == '__main__':
     main(odir, config, args.specdir, args.r_true, args.seed, args.n_train,
          args.n_samples, args.n_rounds, args.pyilcdir, args.use_dbeta_map, no_norm=args.no_norm,
          score_compress=args.score_compress, embed=args.embed,
-         embed_num_layers=args.embed_num_layers, embed_num_hiddens=args.embed_num_hiddens)
+         embed_num_layers=args.embed_num_layers, embed_num_hiddens=args.embed_num_hiddens,
+         fmpe=args.fmpe)
