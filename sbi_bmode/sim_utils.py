@@ -126,8 +126,8 @@ class CMBSimulator():
 
                 return loglike
                 
-            grad_logdens = grad(get_loglike, argnums=0)
-            self.score_compress = lambda x: grad_logdens(score_params_arr, x)
+            self.grad_logdens = grad(get_loglike, argnums=0)
+            self.score_compress = lambda x: self.grad_logdens(score_params_arr, x)
             
     def get_signal_spectra(self, r_tensor, A_lens, A_d_BB, alpha_d_BB, beta_dust):
         '''
@@ -257,6 +257,8 @@ class CMBSimulator():
         '''
         if simple:
             if not hasattr(self, 'data_mean'):
+                # This is to make sure that we re-use the mean and std
+                # from the first round in sequential NPE.
                 self.data_mean = np.mean(data, axis=0)
                 self.data_std = np.std(data, axis=0)
             data_norm = (data-self.data_mean)/self.data_std

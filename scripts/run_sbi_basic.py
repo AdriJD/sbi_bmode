@@ -34,7 +34,7 @@ def get_prior(params_dict):
     Parameters
     ----------
     params_dict : dict
-        Dictionary with parameters that we sample.    
+        Dictionary with parameters that we sample.
 
     Returns
     -------
@@ -43,27 +43,27 @@ def get_prior(params_dict):
     param_names : list of str
         List of parameter names in same order as prior.
     '''
-    
+
     prior = []
     param_names = []
     for param, prior_dict in params_dict.items():
-    
+
         if prior_dict['prior_type'].lower() == 'normal':
-            prior.append(Normal(*prior_dict['prior_params']))                         
+            prior.append(Normal(*prior_dict['prior_params']))
         elif prior_dict['prior_type'].lower() == 'halfnormal':
             prior.append(HalfNormal(*prior_dict['prior_params']))
         else:
             raise ValueError(f"{prior_dict['prior_type']=} not understood")
         param_names.append(param)
-    
+
     # sbi needs the distributions to not be scalar.
     return [p.expand(torch.Size([1])) for p in prior], param_names
-    
+
 def simulate_for_sbi_mpi(simulator, proposal, param_names, num_sims, ndata, seed, comm,
                          score_compress, mat_compress=None):
     '''
     Draw parameters from proposal and simulate data.
-    
+
     Parameters
     ----------
     simulator : CMBSimulator object
@@ -83,8 +83,8 @@ def simulate_for_sbi_mpi(simulator, proposal, param_names, num_sims, ndata, seed
     score_compress : bool
         Apply score compression.
     mat_compress : (ntheta, ndata) array, optional
-        Apply this compression matrix to the data vectors.    
-    
+        Apply this compression matrix to the data vectors.
+
     Returns
     -------
     theta : (num_sims, ntheta) torch tensor, None
@@ -92,7 +92,7 @@ def simulate_for_sbi_mpi(simulator, proposal, param_names, num_sims, ndata, seed
     sims : (num_sims, ndata) torch tensor, None
         Data draws, only on root rank.
     '''
-    
+
     div, mod = np.divmod(num_sims, comm.size)
     num_sims_per_rank = np.full(comm.size, div, dtype=int)
     num_sims_per_rank[:mod] += 1
@@ -117,7 +117,7 @@ def simulate_for_sbi_mpi(simulator, proposal, param_names, num_sims, ndata, seed
         if score_compress:
             draw = simulator.score_compress(draw)
         sims[idx] = draw
-        
+
     if comm.rank == 0:
         thetas_full = np.zeros(num_sims * ntheta, dtype=np.float64)
         sims_full = np.zeros(num_sims * ndata, dtype=np.float64)
@@ -127,21 +127,21 @@ def simulate_for_sbi_mpi(simulator, proposal, param_names, num_sims, ndata, seed
 
     offsets_theta = np.zeros(comm.size)
     offsets_theta[1:] = np.cumsum(num_sims_per_rank * ntheta)[:-1]
- 
+
     offsets_sims = np.zeros(comm.size)
     offsets_sims[1:] = np.cumsum(num_sims_per_rank * ndata)[:-1]
-                                                             
+
     comm.Gatherv(
         sendbuf=thetas,
         recvbuf=(thetas_full, num_sims_per_rank * ntheta, offsets_theta, MPI.DOUBLE), root=0)
     comm.Gatherv(
         sendbuf=sims,
-        recvbuf=(sims_full, num_sims_per_rank * ndata, offsets_sims, MPI.DOUBLE), root=0)    
+        recvbuf=(sims_full, num_sims_per_rank * ndata, offsets_sims, MPI.DOUBLE), root=0)
 
     if comm.rank == 0:
         thetas_full = torch.as_tensor(thetas_full.reshape(num_sims, ntheta).astype(np.float32))
         sims_full = torch.as_tensor(sims_full.reshape(num_sims, ndata).astype(np.float32))
-        
+
     return thetas_full, sims_full
 
 def get_true_params(params_dict):
@@ -151,8 +151,8 @@ def get_true_params(params_dict):
     Parameters
     ----------
     params_dict : dict
-        Dictionary with parameters that we sample.    
-    
+        Dictionary with parameters that we sample.
+
     Returns
     -------
     true_params : dict
@@ -176,7 +176,7 @@ def main(odir, config, specdir, r_true, seed, n_train, n_samples, n_rounds, pyil
     odir : str
         Path to output directory.
     config : dict
-        Dictionary with "data", "fixed_params" and "params" keys.    
+        Dictionary with "data", "fixed_params" and "params" keys.
     specdir : str
         Path to data directory containing power spectrum files.
     r_true : float
@@ -215,7 +215,7 @@ def main(odir, config, specdir, r_true, seed, n_train, n_samples, n_rounds, pyil
 
     if score_compress and e_moped:
         raise ValueError("Cannot have both score and e-MOPED compression.")
-    
+
     # Seed SBI. Annoyingly, this is using a bunch of global seeds. Every rank
     # gets a unique global seed.
     if comm.rank == 0:
@@ -223,7 +223,7 @@ def main(odir, config, specdir, r_true, seed, n_train, n_samples, n_rounds, pyil
         seed_per_rank = seed_global.spawn(comm.size)
     else:
         seed_per_rank = None
-            
+
     seed_per_rank = comm.scatter(seed_per_rank, root=0)
     # Per rank create one rng for SBI backend and one for drawing simulations.
     rng_sbi, rng_sims = [np.random.default_rng(s) for s in seed_per_rank.spawn(2)]
@@ -232,12 +232,12 @@ def main(odir, config, specdir, r_true, seed, n_train, n_samples, n_rounds, pyil
     data_dict, fixed_params_dict, params_dict = script_utils.parse_config(config)
     prior, param_names = get_prior(params_dict)
     prior, num_parameters, prior_returns_numpy = process_prior(prior)
-    
+
     print(f'{prior.mean=}')
     mean_dict = {}
     for idx, name in enumerate(param_names):
         mean_dict[name] = float(prior.mean[idx])
-        
+
     if not pyilcdir and not no_norm:
         norm_params = mean_dict
     elif pyilcdir and not no_norm:
@@ -248,21 +248,21 @@ def main(odir, config, specdir, r_true, seed, n_train, n_samples, n_rounds, pyil
     if r_true is not None:
         params_dict['r_tensor']['true_value'] = r_true
     true_params = get_true_params(params_dict)
-        
+
     if score_compress:
         # For now, compute the score around the true parameter values.
         score_params = true_params
     else:
-        score_params = None    
+        score_params = None
 
     cmb_simulator = sim_utils.CMBSimulator(
         specdir, data_dict, fixed_params_dict, pyilcdir, use_dbeta_map, odir, norm_params=norm_params,
-        score_params=score_params)    
+        score_params=score_params)
 
     proposal = prior
 
     # Define observations. Important that all ranks agree on this.
-    if comm.rank == 0:                
+    if comm.rank == 0:
         x_obs = cmb_simulator.draw_data(
             r_tensor=true_params['r_tensor'], A_lens=true_params['A_lens'],
             A_d_BB=true_params['A_d_BB'], alpha_d_BB=true_params['alpha_d_BB'],
@@ -270,30 +270,30 @@ def main(odir, config, specdir, r_true, seed, n_train, n_samples, n_rounds, pyil
     else:
         x_obs = None
     x_obs = comm.bcast(x_obs, root=0)
-    
-    mat_compress = None    
-    if e_moped:        
+
+    mat_compress = None
+    if e_moped:
         # Draw some simulations from the prior to estimate the compression matrix.
         theta, x = simulate_for_sbi_mpi(
             cmb_simulator, proposal, param_names, n_moped, cmb_simulator.size_data,
             rng_sims, comm, score_compress)
         if comm.rank == 0:
             mat_compress = compress_utils.get_e_moped_matrix(x.numpy(), theta.numpy())
-        mat_compress = comm.bcast(mat_compress, root=0)            
-        data_size = num_parameters        
+        mat_compress = comm.bcast(mat_compress, root=0)
+        data_size = num_parameters
     elif score_compress:
         data_size = num_parameters
     else:
-        data_size = cmb_simulator.size_data        
-    
+        data_size = cmb_simulator.size_data
+
     x_obs_full = x_obs.copy() # We always want to save the full data vector.
     if e_moped:
         x_obs = np.dot(mat_compress, x_obs)
     if score_compress:
-        x_obs = np.asarray(cmb_simulator.score_compress(x_obs))        
+        x_obs = np.asarray(cmb_simulator.score_compress(x_obs))
     if comm.rank == 0:
         print(f'{x_obs.size=}')
-    
+
     if embed:
         embedding_net = FCEmbedding(
            input_dim=x_obs.size,
@@ -313,15 +313,21 @@ def main(odir, config, specdir, r_true, seed, n_train, n_samples, n_rounds, pyil
         inference = SNPE(prior, density_estimator='maf')
 
     # Train the SNPE.
-    for _ in range(n_rounds):
+    for ridx in range(n_rounds):
         theta, x = simulate_for_sbi_mpi(
             cmb_simulator, proposal, param_names, n_train, data_size,
             rng_sims, comm, score_compress, mat_compress=mat_compress)
 
         if comm.rank == 0:
 
-            print(x)
-            if fmpe:            
+            print(f'param draws : {theta}')
+            print(f'data draws : {x}')
+
+            # Save parameters and data draws to disk for debugging.
+            np.save(opj(odir, f'param_draws_round_{ridx:03d}'), np.asarray(theta))
+            np.save(opj(odir, f'data_draws_round_{ridx:03d}'), np.asarray(x))
+
+            if fmpe:
                 density_estimator = inference.append_simulations(
                     theta, x, proposal=proposal,
                 ).train(show_train_summary=True, training_batch_size=200, learning_rate=5e-4)
@@ -329,10 +335,10 @@ def main(odir, config, specdir, r_true, seed, n_train, n_samples, n_rounds, pyil
                 density_estimator = inference.append_simulations(
                     theta, x, proposal=proposal,
                 ).train(show_train_summary=True, use_combined_loss=True)
-                
+
             posterior = inference.build_posterior(density_estimator)
             proposal = posterior.set_default_x(x_obs)
-            
+
         proposal = comm.bcast(proposal, root=0)
 
     if comm.rank == 0:
@@ -340,14 +346,15 @@ def main(odir, config, specdir, r_true, seed, n_train, n_samples, n_rounds, pyil
             pickle.dump(posterior, handle)
         samples = posterior.sample((n_samples,), x=x_obs)
         np.save(opj(odir, 'samples.npy'), samples)
-        if norm_params: 
-            simple = True if pyilcdir is not None else False           
+        if norm_params:
+            simple = True if pyilcdir is not None else False
+            np.save(opj(odir, 'data_unnorm.npy'), x_obs)
             np.save(opj(odir, 'data.npy'), cmb_simulator.get_unnorm_data(x_obs, simple=simple))
         else:
-            np.save(opj(odir, 'data.npy'), x_obs_full)            
-        with open(opj(odir, 'config.yaml'), "w") as handle:  
+            np.save(opj(odir, 'data.npy'), x_obs_full)
+        with open(opj(odir, 'config.yaml'), "w") as handle:
             yaml.safe_dump(config, handle)
-        
+
     comm.Barrier()
 
 if __name__ == '__main__':
@@ -379,22 +386,22 @@ if __name__ == '__main__':
     parser.add_argument('--fmpe', action='store_true', help="Use Flow-Matching Posterior Estimation.")
     parser.add_argument('--e-moped', action='store_true', help="Use e-MOPED to compress the data vector")
     parser.add_argument('--n-moped', type=int, help="Number of sims used to estimate e-moped matrix",
-                        default=1000)    
-    
+                        default=1000)
+
     args = parser.parse_args()
 
     odir = args.odir
     if comm.rank == 0:
-        
-        print(f'Running with arguments: {args}')        
+
+        print(f'Running with arguments: {args}')
         print(f'Running with {comm.size} MPI rank(s)')
-        
+
         os.makedirs(odir, exist_ok=True)
         with open(args.config, 'r') as yfile:
             config = yaml.safe_load(yfile)
     else:
         config = None
-    config = comm.bcast(config, root=0)        
+    config = comm.bcast(config, root=0)
 
     main(odir, config, args.specdir, args.r_true, args.seed, args.n_train,
          args.n_samples, args.n_rounds, args.pyilcdir, args.use_dbeta_map, no_norm=args.no_norm,

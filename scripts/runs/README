@@ -12,6 +12,11 @@ run10	like run09 but with config10 (Different true values (not centered on prior
 run11	like run09 but with score compression
 run12	test run with pyilc and config09, 2000 sims
 run13	like run12 but with neural network compression
+run13b  like run13 but 5 rounds
+run13c  like run13b but smaller to debug draws
+run13d  like run13c but for multifreq case.
+run13e	like run13c but with no norm and embedding.
+run13f	like run13c but with norm and different units dust
 run14 	like run12 but with 6000 sims
 run15	like run12 but with 2000 sims?
 run16	like run12 but with FMPE

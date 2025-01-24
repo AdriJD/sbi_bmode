@@ -37,14 +37,7 @@ def get_e_moped_matrix(data, params):
     a_mat = np.dot(cov_data_params, np.linalg.inv(cov_params))
     b_vec = np.mean(data, axis=0) - np.dot(a_mat, params_mean)
 
-    #print(f'{a_mat.shape=}')
-    #print(f'{params.shape=}')
-    #print(f'{params_mean.shape=}')        
-    #print(f'{(params - params_mean).shape=}')
-    #data_shifted = data - np.dot(a_mat, (params - params_mean[np.newaxis,:]))
-    data_shifted = data - np.einsum('ij, kj -> ki', a_mat, (params - params_mean))
-    #print(f'{data_shifted.shape=}')        
-    
+    data_shifted = data - np.einsum('ij, kj -> ki', a_mat, (params - params_mean))    
     cov_data_shifted = np.cov(data_shifted.T)
     
     return get_moped_vectors(data_shifted, cov_data_shifted, a_mat)
