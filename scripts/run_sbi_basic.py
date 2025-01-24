@@ -167,7 +167,7 @@ def get_true_params(params_dict):
 
 def main(odir, config, specdir, r_true, seed, n_train, n_samples, n_rounds, pyilcdir, use_dbeta_map,
          no_norm=False, score_compress=False, embed=False, embed_num_layers=2,
-         embed_num_hiddens=25, fmpe=False, e_moped=False, n_moped=None):
+         embed_num_hiddens=25, fmpe=False, e_moped=False, n_moped=None, canon_corr=False, n_canon_corr=None):
     '''
     Run SBI.
 
@@ -211,10 +211,15 @@ def main(odir, config, specdir, r_true, seed, n_train, n_samples, n_rounds, pyil
         Use e-MOPED compression for the data vector.
     n_moped : int, optional
         Number of simulations used for e-MOPED compression matrix.
+    canon_corr : bool, optional
+        Use CCA compression for the data vector.
+    n_canon_corr : int, optional
+        Number of simulations used for CCA compression matrix
+
     '''
 
-    if score_compress and e_moped:
-        raise ValueError("Cannot have both score and e-MOPED compression.")
+    if (score_compress + e_moped + canonical_correlation) > 1: 
+        raise ValueError("Please only choose one correlation method.")
     
     # Seed SBI. Annoyingly, this is using a bunch of global seeds. Every rank
     # gets a unique global seed.
@@ -271,7 +276,10 @@ def main(odir, config, specdir, r_true, seed, n_train, n_samples, n_rounds, pyil
         x_obs = None
     x_obs = comm.bcast(x_obs, root=0)
     
-    mat_compress = None    
+    mat_compress = None
+    evals = None
+    evecs = None
+    
     if e_moped:        
         # Draw some simulations from the prior to estimate the compression matrix.
         theta, x = simulate_for_sbi_mpi(
@@ -283,6 +291,15 @@ def main(odir, config, specdir, r_true, seed, n_train, n_samples, n_rounds, pyil
         data_size = num_parameters        
     elif score_compress:
         data_size = num_parameters
+    elif canon_corr:
+        theta, x = simulate_for_sbi_mpi(
+            cmb_simulator, proposal, param_names, n_canon_corr, cmb_simulator.size_data,
+            rng_sims, comm, score_compress=False)
+        if comm.rank == 0:
+            evals, evecs = compress_utils.get_cca_eigen(x.numpy(), theta.numpy())
+        evals = comm.bcast(evals, root=0)
+        evecs = comm.bcast(evecs, root=0)
+        data_size = num_parameters
     else:
         data_size = cmb_simulator.size_data        
     
@@ -290,7 +307,10 @@ def main(odir, config, specdir, r_true, seed, n_train, n_samples, n_rounds, pyil
     if e_moped:
         x_obs = np.dot(mat_compress, x_obs)
     if score_compress:
-        x_obs = np.asarray(cmb_simulator.score_compress(x_obs))        
+        x_obs = np.asarray(cmb_simulator.score_compress(x_obs))
+    if ccanon_corr:
+        x_obs = x_obs@evecs
+
     if comm.rank == 0:
         print(f'{x_obs.size=}')
     
@@ -367,19 +387,22 @@ if __name__ == '__main__':
     parser.add_argument('--n_samples', type=int, default=10000, help="samples of posterior")
     parser.add_argument('--n_rounds', type=int, default=1, help="number of sequential rounds")
 
-    parser.add_argument('--score-compress', action='store_true',
+    parser.add_argument('--score_compress', action='store_true',
                         help="Compress data vector with score compression")
-    parser.add_argument('--no-norm', action='store_true', help="Do not normalize the data vector")
+    parser.add_argument('--no_norm', action='store_true', help="Do not normalize the data vector")
     parser.add_argument('--embed', action='store_true',
                         help="Estimate and apply embedding (compression) network")
-    parser.add_argument('--embed-num-layers', type=int, default=2,
+    parser.add_argument('--embed_num_layers', type=int, default=2,
                         help="Number of layers in embedding nework")
-    parser.add_argument('--embed-num-hiddens', type=int, default=25,
+    parser.add_argument('--embed_num_hiddens', type=int, default=25,
                         help="Number of hidden units in each layer of the embedding network")
     parser.add_argument('--fmpe', action='store_true', help="Use Flow-Matching Posterior Estimation.")
-    parser.add_argument('--e-moped', action='store_true', help="Use e-MOPED to compress the data vector")
-    parser.add_argument('--n-moped', type=int, help="Number of sims used to estimate e-moped matrix",
-                        default=1000)    
+    parser.add_argument('--e_moped', action='store_true', help="Use e-MOPED to compress the data vector")
+    parser.add_argument('--n_moped', type=int, help="Number of sims used to estimate e-moped matrix",
+                        default=1000)
+    parser.add_argument('--canon_corr', action='store_true', help='Use CCA to compress the data vector')
+    parser.add_argument('--n_canon_corr', type=int, help="Number of sims used to estimate CCA eigenvectors",
+                        default=1000)
     
     args = parser.parse_args()
 
@@ -400,4 +423,5 @@ if __name__ == '__main__':
          args.n_samples, args.n_rounds, args.pyilcdir, args.use_dbeta_map, no_norm=args.no_norm,
          score_compress=args.score_compress, embed=args.embed,
          embed_num_layers=args.embed_num_layers, embed_num_hiddens=args.embed_num_hiddens,
-         fmpe=args.fmpe, e_moped=args.e_moped, n_moped=args.n_moped)
+         fmpe=args.fmpe, e_moped=args.e_moped, n_moped=args.n_moped, canon_corr=args.canon_corr,
+         n_canon_corr = args.n_canon_corr)

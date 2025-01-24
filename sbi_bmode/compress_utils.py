@@ -1,6 +1,22 @@
 import os
-
+from scipy.linalg import eigh
 import numpy as np
+
+def get_cca_eigen(data, params):
+    '''
+    compute a canonical compression eigenvectors and values from the training data and parameters
+    '''
+    nsims, ndata = data.shape
+    ntheta = params.shape[-1]
+    cov = np.cov(params.T, data.T)
+    cp = cov[:ntheta,:ntheta]
+    cd = cov[ntheta:,ntheta:]
+    cpd = cov[:ntheta,ntheta:]
+    cl = cpd.T@np.linalg.inv(cp)@cpd
+    evals, evecs = eigh(cd, cd - cl)
+
+    return evals, evecs
+
 
 def get_e_moped_matrix(data, params):
     '''
