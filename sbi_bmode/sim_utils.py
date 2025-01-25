@@ -34,9 +34,11 @@ class CMBSimulator():
         auto- and cross-spectra in the data vector
     odir: str
         Path to output directory
-    norm_params: 
-    score_params: 
-
+    norm_params: dict, optional
+        Parameters of fiducial model used to whiten the (multifrequency) data.
+    score_params: dict, optional
+        Parameters of fiducial model where the score is evaluted for score
+        compression.
     '''
     
     def __init__(self, specdir, data_dict, fixed_params_dict, pyilcdir=None, use_dbeta_map=False,
@@ -99,7 +101,7 @@ class CMBSimulator():
             self.isqrt_norm_cov = mat_utils.matpow(norm_cov, -0.5, return_diag=True)  
             
         self.score_params = score_params
-        if self.score_params:
+        if self.score_params and pyilcdir is None:
             
             if self.score_params and self.norm_params:
                 raise ValueError('Cannot have both norm_params and score_params')
@@ -224,9 +226,10 @@ class CMBSimulator():
                     B_maps[split, f] = 10**(-6)*hp.alm2map(alm_B, self.nside)
             map_tmpdir = nilc_utils.write_maps(B_maps, output_dir=self.odir)
             nilc_maps = nilc_utils.get_nilc_maps(self.pyilcdir, map_tmpdir, self.nsplit, self.nside, 
-                                                beta_dust, self.temp_dust, self.freq_pivot_dust, 
-                                                so_utils.sat_central_freqs, so_utils.sat_beam_fwhms,
-                                                use_dbeta_map=self.use_dbeta_map, output_dir=self.odir, remove_files=True, debug=False)
+                                                 beta_dust, self.temp_dust, self.freq_pivot_dust, 
+                                                 so_utils.sat_central_freqs, so_utils.sat_beam_fwhms,
+                                                 use_dbeta_map=self.use_dbeta_map, output_dir=self.odir,
+                                                 remove_files=True, debug=False)
             spectra = estimate_spectra_nilc(nilc_maps, self.minfo, self.ainfo)
         
         else:
@@ -235,12 +238,11 @@ class CMBSimulator():
         data = get_final_data_vector(spectra, self.bins, self.lmin, self.lmax)
 
         if self.norm_params:
-            simple = True if self.pyilcdir is not None else False
-            data = self.get_norm_data(data, simple=simple)
+            data = self.get_norm_data(data)
             
         return data
 
-    def get_norm_data(self, data, simple=False):
+    def get_norm_data(self, data):
         '''
         Subtract mean and multiply by inverse sqrt of covariance.
 
@@ -248,30 +250,23 @@ class CMBSimulator():
         ----------
         data : (ndata) array
             Input data.
-        simple: Bool, if True, subtracts mean and divides by sqrt(var) for each element
         
         Returns
         -------
         data_norm : (ndata) array
             Normalized data.
         '''
-        if simple:
-            if not hasattr(self, 'data_mean'):
-                # This is to make sure that we re-use the mean and std
-                # from the first round in sequential NPE.
-                self.data_mean = np.mean(data, axis=0)
-                self.data_std = np.std(data, axis=0)
-            data_norm = (data-self.data_mean)/self.data_std
-            return data_norm
+        
         ntri = get_ntri(self.nsplit, self.nfreq)
         tri_indices = get_tri_indices(self.nsplit, self.nfreq)
         data = likelihood_utils.get_diff(
             data.reshape(ntri, -1), self.norm_model, tri_indices)
         data = np.einsum('ijk, jk -> ik', self.isqrt_norm_cov, data)
         data_norm = data.reshape(-1)
+        
         return data_norm
 
-    def get_unnorm_data(self, data_norm, simple=False):
+    def get_unnorm_data(self, data_norm):
         '''
         Subtract mean and multiply by inverse sqrt of covariance.
 
@@ -279,17 +274,13 @@ class CMBSimulator():
         ----------
         data_norm : (ndata) array
             Nomalized data.
-        simple: Bool, if True, norm computed by subtracting mean and dividing
-                 by sqrt(var) for each element
         
         Returns
         -------
         data : (ndata) array
             Unnormalized data.
         '''
-        if simple:
-            data = data_norm * self.data_std + self.data_mean
-            return data
+
         ntri = get_ntri(self.nsplit, self.nfreq)
         tri_indices = get_tri_indices(self.nsplit, self.nfreq)
         data = np.einsum(

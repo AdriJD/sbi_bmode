@@ -1,0 +1,39 @@
+#!/bin/bash
+#SBATCH --job-name=run13k
+#SBATCH --partition=preempt
+#SBATCH --qos=preempt
+#SBATCH --constraint=rome
+#SBATCH --nodes=6
+#SBATCH --ntasks-per-node=128
+#SBATCH --cpus-per-task=1
+#SBATCH --time=07:00:00
+
+export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
+#export OMP_NUM_THREADS=1
+
+module load adri_gcc
+module load adri_base
+source /mnt/home/aduivenvoorden/.pyenv/versions/enki/bin/activate
+
+TAG=run13k
+ANADIR=/mnt/home/aduivenvoorden/local/cca_project/scripts
+ODIR=/mnt/home/aduivenvoorden/project/so/20240521_sbi_bmode/${TAG}
+SPECDIR=/mnt/home/aduivenvoorden/local/cca_project/data
+CONFIGDIR=/mnt/home/aduivenvoorden/local/cca_project/scripts/configs
+
+CONFIG=${CONFIGDIR}/config09.yaml
+
+export JAX_ENABLE_X64=True
+export JAX_DEBUG_NANS=True
+export JAX_PLATFORMS=cpu    
+
+for r_true in 0.005
+do
+    for n_train in 15000
+    do    
+    	srun -u --cpu-bind=cores -c $SLURM_CPUS_PER_TASK python ${ANADIR}/run_sbi_basic.py --odir ${ODIR} --config ${CONFIG} --specdir ${SPECDIR} --r_true ${r_true} --n_train ${n_train} --n_samples 50000 --n_rounds 3 --pyilcdir /mnt/home/aduivenvoorden/local/pyilc --embed
+
+    done
+done
+
+cp ./slurm-${SLURM_JOB_ID}.out ${ODIR}

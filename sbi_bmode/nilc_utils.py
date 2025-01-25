@@ -122,9 +122,11 @@ def get_nilc_maps(pyilc_path, map_tmpdir, nsplit, nside, beta_dust, temp_dust, f
         
         #load NILC maps, then remove nilc tmpdir
         cmb_nilc = hp.read_map(f'{nilc_tmpdir}/needletILCmap_component_CMB.fits')
-        dust_nilc = 10**6*hp.read_map(f'{nilc_tmpdir}/needletILCmap_component_CIB.fits')
+        #dust_nilc = 10**6*hp.read_map(f'{nilc_tmpdir}/needletILCmap_component_CIB.fits')
+        dust_nilc = hp.read_map(f'{nilc_tmpdir}/needletILCmap_component_CIB.fits')        
         if use_dbeta_map:
-            dbeta_nilc = 10**6*hp.read_map(f'{nilc_tmpdir}/needletILCmap_component_CIB_dbeta.fits')
+            #dbeta_nilc = 10**6*hp.read_map(f'{nilc_tmpdir}/needletILCmap_component_CIB_dbeta.fits')
+            dbeta_nilc = hp.read_map(f'{nilc_tmpdir}/needletILCmap_component_CIB_dbeta.fits')            
             nilc_maps[split] = np.array([cmb_nilc, dust_nilc, dbeta_nilc])
         else:
             nilc_maps[split] = np.array([cmb_nilc, dust_nilc])

@@ -17,6 +17,11 @@ run13c  like run13b but smaller to debug draws
 run13d  like run13c but for multifreq case.
 run13e	like run13c but with no norm and embedding.
 run13f	like run13c but with norm and different units dust
+run13g	like run13f but after fixing normalization simple.
+run13h  like run13g but with more sims
+run13i  like run13g but with embedding network
+run13j  like run13h but more sims
+run13k  like run13i but more sims
 run14 	like run12 but with 6000 sims
 run15	like run12 but with 2000 sims?
 run16	like run12 but with FMPE

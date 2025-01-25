@@ -27,6 +27,56 @@ from sbi_bmode import sim_utils, script_utils, compress_utils
 opj = os.path.join
 comm = MPI.COMM_WORLD
 
+def normalize_simple(data, data_mean, data_std):
+    '''
+    Normalize data vector.
+
+    Parameters
+    ----------
+    data : (nsim, ndata) array
+        Data vector.
+    data_mean : (ndata) array
+        Mean over simulations
+    data_std : (ndata) array
+        Standard deviation over simulations.
+
+    Returns
+    -------
+    data_norm : (nsim, ndata) array
+        Normalized data.
+    '''
+
+    shape = data.shape
+    if data.ndim == 1:
+        data = data[np.newaxis,:]
+    
+    return ((data - data_mean) / data_std).reshape(shape)
+
+def unnormalize_simple(data_norm, data_mean, data_std):
+    '''
+    Undo the normalization of a data vector.
+
+    Parameters
+    ----------
+    data_norm : (nsim, ndata) array
+        Normalized data vector.
+    data_mean : (ndata) array
+        Mean over simulations
+    data_std : (ndata) array
+        Standard deviation over simulations.
+
+    Returns
+    -------
+    data : (nsim, ndata) array
+        Unnormalized data.    
+    '''
+
+    shape = data_norm.shape
+    if data_norm.ndim == 1:
+        data_norm = data_norm[np.newaxis,:]
+        
+    return (data_norm * data_std + data_mean).reshape(shape)
+
 def get_prior(params_dict):
     '''
     Parse parameter dictionary and return pytorch prior distribution.
@@ -238,13 +288,13 @@ def main(odir, config, specdir, r_true, seed, n_train, n_samples, n_rounds, pyil
     for idx, name in enumerate(param_names):
         mean_dict[name] = float(prior.mean[idx])
 
+    norm_params = None
+    norm_simple = False
     if not pyilcdir and not no_norm:
-        norm_params = mean_dict
+        norm_params = mean_dict         
     elif pyilcdir and not no_norm:
-        norm_params = True
-    else:
-        norm_params = None
-
+        norm_simple = True
+        
     if r_true is not None:
         params_dict['r_tensor']['true_value'] = r_true
     true_params = get_true_params(params_dict)
@@ -261,6 +311,22 @@ def main(odir, config, specdir, r_true, seed, n_train, n_samples, n_rounds, pyil
 
     proposal = prior
 
+    if norm_simple:
+        # Draw some simulatons to find a normalization.
+        # Ideally this would be done during the first round of inference
+        # but easier for now to do here. We shouldn't need too many sims.
+        n_norm = 128
+        _, x_norm = simulate_for_sbi_mpi(
+            cmb_simulator, proposal, param_names, n_norm, cmb_simulator.size_data,
+            rng_sims, comm, score_compress)
+        if comm.rank == 0:
+            data_mean = np.mean(np.asarray(x_norm), axis=0)
+            data_std = np.std(np.asarray(x_norm), axis=0)        
+        else:
+            data_mean, data_std = None, None
+        data_mean = comm.bcast(data_mean, root=0)
+        data_std = comm.bcast(data_std, root=0)
+        
     # Define observations. Important that all ranks agree on this.
     if comm.rank == 0:
         x_obs = cmb_simulator.draw_data(
@@ -271,16 +337,25 @@ def main(odir, config, specdir, r_true, seed, n_train, n_samples, n_rounds, pyil
         x_obs = None
     x_obs = comm.bcast(x_obs, root=0)
 
+    if norm_simple:
+        x_obs = normalize_simple(x_obs, data_mean, data_std)
+    
     mat_compress = None
     if e_moped:
         # Draw some simulations from the prior to estimate the compression matrix.
         theta, x = simulate_for_sbi_mpi(
             cmb_simulator, proposal, param_names, n_moped, cmb_simulator.size_data,
             rng_sims, comm, score_compress)
+
         if comm.rank == 0:
+
+            if norm_simple:
+                x = normalize_simple(x.numpy(), data_mean, data_std)        
+            
             mat_compress = compress_utils.get_e_moped_matrix(x.numpy(), theta.numpy())
         mat_compress = comm.bcast(mat_compress, root=0)
         data_size = num_parameters
+        
     elif score_compress:
         data_size = num_parameters
     else:
@@ -320,9 +395,12 @@ def main(odir, config, specdir, r_true, seed, n_train, n_samples, n_rounds, pyil
 
         if comm.rank == 0:
 
+            if norm_simple:
+                x = normalize_simple(x, torch.as_tensor(data_mean), torch.as_tensor(data_std))
+            
             print(f'param draws : {theta}')
             print(f'data draws : {x}')
-
+                       
             # Save parameters and data draws to disk for debugging.
             np.save(opj(odir, f'param_draws_round_{ridx:03d}'), np.asarray(theta))
             np.save(opj(odir, f'data_draws_round_{ridx:03d}'), np.asarray(x))
@@ -347,9 +425,11 @@ def main(odir, config, specdir, r_true, seed, n_train, n_samples, n_rounds, pyil
         samples = posterior.sample((n_samples,), x=x_obs)
         np.save(opj(odir, 'samples.npy'), samples)
         if norm_params:
-            simple = True if pyilcdir is not None else False
             np.save(opj(odir, 'data_unnorm.npy'), x_obs)
-            np.save(opj(odir, 'data.npy'), cmb_simulator.get_unnorm_data(x_obs, simple=simple))
+            np.save(opj(odir, 'data.npy'), cmb_simulator.get_unnorm_data(x_obs))
+        elif norm_simple:
+            np.save(opj(odir, 'data_unnorm.npy'), x_obs)
+            np.save(opj(odir, 'data.npy'), unnormalize_simple(x_obs, data_mean, data_std))
         else:
             np.save(opj(odir, 'data.npy'), x_obs_full)
         with open(opj(odir, 'config.yaml'), "w") as handle:
