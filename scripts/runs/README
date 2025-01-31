@@ -22,6 +22,7 @@ run13h  like run13g but with more sims
 run13i  like run13g but with embedding network
 run13j  like run13h but more sims
 run13k  like run13i but more sims
+run13l  like run13g but with e-moped
 run14 	like run12 but with 6000 sims
 run15	like run12 but with 2000 sims?
 run16	like run12 but with FMPE

@@ -284,6 +284,7 @@ def main(odir, config, specdir, r_true, seed, n_train, n_samples, n_rounds, pyil
     prior, num_parameters, prior_returns_numpy = process_prior(prior)
 
     print(f'{prior.mean=}')
+    print(f'{prior.stddev=}')    
     mean_dict = {}
     for idx, name in enumerate(param_names):
         mean_dict[name] = float(prior.mean[idx])
@@ -311,14 +312,32 @@ def main(odir, config, specdir, r_true, seed, n_train, n_samples, n_rounds, pyil
 
     proposal = prior
 
+    mat_compress = None
+    if e_moped:
+        # Draw some simulations from the prior to estimate the compression matrix.
+        theta, x = simulate_for_sbi_mpi(
+            cmb_simulator, proposal, param_names, n_moped, cmb_simulator.size_data,
+            rng_sims, comm, score_compress)
+
+        if comm.rank == 0:
+            mat_compress = compress_utils.get_e_moped_matrix(x.numpy(), theta.numpy())
+        del theta, x
+        mat_compress = comm.bcast(mat_compress, root=0)
+        data_size = num_parameters
+        
+    elif score_compress:
+        data_size = num_parameters
+    else:
+        data_size = cmb_simulator.size_data
+        
     if norm_simple:
-        # Draw some simulatons to find a normalization.
+        # Draw some simulations from the prior to find a normalization.
         # Ideally this would be done during the first round of inference
         # but easier for now to do here. We shouldn't need too many sims.
         n_norm = 128
         _, x_norm = simulate_for_sbi_mpi(
-            cmb_simulator, proposal, param_names, n_norm, cmb_simulator.size_data,
-            rng_sims, comm, score_compress)
+            cmb_simulator, proposal, param_names, n_norm, data_size,
+            rng_sims, comm, score_compress, mat_compress=mat_compress)
         if comm.rank == 0:
             data_mean = np.mean(np.asarray(x_norm), axis=0)
             data_std = np.std(np.asarray(x_norm), axis=0)        
@@ -336,32 +355,9 @@ def main(odir, config, specdir, r_true, seed, n_train, n_samples, n_rounds, pyil
     else:
         x_obs = None
     x_obs = comm.bcast(x_obs, root=0)
-
-    if norm_simple:
-        x_obs = normalize_simple(x_obs, data_mean, data_std)
     
-    mat_compress = None
-    if e_moped:
-        # Draw some simulations from the prior to estimate the compression matrix.
-        theta, x = simulate_for_sbi_mpi(
-            cmb_simulator, proposal, param_names, n_moped, cmb_simulator.size_data,
-            rng_sims, comm, score_compress)
-
-        if comm.rank == 0:
-
-            if norm_simple:
-                x = normalize_simple(x.numpy(), data_mean, data_std)        
-            
-            mat_compress = compress_utils.get_e_moped_matrix(x.numpy(), theta.numpy())
-        mat_compress = comm.bcast(mat_compress, root=0)
-        data_size = num_parameters
-        
-    elif score_compress:
-        data_size = num_parameters
-    else:
-        data_size = cmb_simulator.size_data
-
     x_obs_full = x_obs.copy() # We always want to save the full data vector.
+
     if e_moped:
         x_obs = np.dot(mat_compress, x_obs)
     if score_compress:
@@ -369,6 +365,9 @@ def main(odir, config, specdir, r_true, seed, n_train, n_samples, n_rounds, pyil
     if comm.rank == 0:
         print(f'{x_obs.size=}')
 
+    if norm_simple:
+        x_obs = normalize_simple(x_obs, data_mean, data_std)
+        
     if embed:
         embedding_net = FCEmbedding(
            input_dim=x_obs.size,
@@ -424,11 +423,12 @@ def main(odir, config, specdir, r_true, seed, n_train, n_samples, n_rounds, pyil
             pickle.dump(posterior, handle)
         samples = posterior.sample((n_samples,), x=x_obs)
         np.save(opj(odir, 'samples.npy'), samples)
+        np.save(opj(odir, 'data_uncompressed.npy'), x_obs_full)
         if norm_params:
-            np.save(opj(odir, 'data_unnorm.npy'), x_obs)
+            np.save(opj(odir, 'data_norm.npy'), x_obs)
             np.save(opj(odir, 'data.npy'), cmb_simulator.get_unnorm_data(x_obs))
         elif norm_simple:
-            np.save(opj(odir, 'data_unnorm.npy'), x_obs)
+            np.save(opj(odir, 'data_norm.npy'), x_obs)
             np.save(opj(odir, 'data.npy'), unnormalize_simple(x_obs, data_mean, data_std))
         else:
             np.save(opj(odir, 'data.npy'), x_obs_full)
