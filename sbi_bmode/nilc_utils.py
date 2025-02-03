@@ -28,7 +28,8 @@ def write_maps(B_maps, output_dir=None):
 
 
 def get_nilc_maps(pyilc_path, map_tmpdir, nsplit, nside, beta_dust, temp_dust, freq_pivot_dust, 
-                  sat_central_freqs, sat_beam_fwhms, use_dbeta_map=False, output_dir=None, remove_files=True, debug=False):
+                  sat_central_freqs, sat_beam_fwhms, use_dbeta_map=False, deproj_dust=False, deproj_dbeta=False,
+                  output_dir=None, remove_files=True, debug=False):
     '''
     Parameters
     ----------
@@ -42,6 +43,8 @@ def get_nilc_maps(pyilc_path, map_tmpdir, nsplit, nside, beta_dust, temp_dust, f
     sat_central_freqs: dict, maps frequency strings to floats representing frequencies
     sat_beam_fwhms: dict, maps frequency strings to floats representing beam FWHM
     use_dbeta_map: Bool, whethert o build map of first moment w.r.t. beta
+    deproj_dust: Bool, Whether to deproject dust in CMB NILC map.
+    deproj_dbeta: Bool, Whether to deproject first moment of dust w.r.t. beta in CMB NILC map.
     output_dir: str, directory in which to make temporary directory for NILC maps
                 (if set to None, the default $TMPDIR will be used)
     remove_files: Bool, whether to remove files when they're no longer needed
@@ -97,6 +100,12 @@ def get_nilc_maps(pyilc_path, map_tmpdir, nsplit, nside, beta_dust, temp_dust, f
 
         #CMB-specific and dust-specific dictionaries
         cmb_param_dict = {'ILC_preserved_comp': 'CMB'}
+        if deproj_dust and deproj_dbeta:
+            cmb_param_dict['ILC_deproj_comps'] = ['CIB','CIB_dbeta']
+            cmb_param_dict['N_deproj'] = 2
+        elif deproj_dust:
+            cmb_param_dict['ILC_deproj_comps'] = ['CIB']
+            cmb_param_dict['N_deproj'] = 1
         dust_param_dict = {'ILC_preserved_comp': 'CIB'}
         cmb_param_dict.update(pyilc_input_params) 
         dust_param_dict.update(pyilc_input_params)

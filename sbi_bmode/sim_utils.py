@@ -32,6 +32,12 @@ class CMBSimulator():
         Only relevant if using nilc (pyilc dir is not None). Whether
         to build map of first moment w.r.t. beta and include it in
         auto- and cross-spectra in the data vector
+    deproj_dust: Bool
+        Only relevant if using nilc (pyilc dir is not None). Whether to
+        deproject dust in CMB NILC map.
+    deproj_dbeta: Bool
+        Only relevant if using nilc (pyilc dir is not None). Whether to
+        deproject first moment of dust w.r.t. beta in CMB NILC map.
     odir: str
         Path to output directory
     norm_params: dict, optional
@@ -42,7 +48,7 @@ class CMBSimulator():
     '''
     
     def __init__(self, specdir, data_dict, fixed_params_dict, pyilcdir=None, use_dbeta_map=False,
-                 odir=None, norm_params=None, score_params=None):
+                deproj_dust=False, deproj_dbeta=False, odir=None, norm_params=None, score_params=None):
         
         self.lmax = data_dict['lmax']
         self.lmin = data_dict['lmin']
@@ -51,6 +57,8 @@ class CMBSimulator():
         self.delta_ell = data_dict['delta_ell']
         self.pyilcdir = pyilcdir
         self.use_dbeta_map = use_dbeta_map
+        self.deproj_dust = deproj_dust
+        self.deproj_dbeta = deproj_dbeta
         self.odir = odir
         self.bins = np.arange(self.lmin, self.lmax, self.delta_ell)
 
@@ -228,7 +236,8 @@ class CMBSimulator():
             nilc_maps = nilc_utils.get_nilc_maps(self.pyilcdir, map_tmpdir, self.nsplit, self.nside, 
                                                  beta_dust, self.temp_dust, self.freq_pivot_dust, 
                                                  so_utils.sat_central_freqs, so_utils.sat_beam_fwhms,
-                                                 use_dbeta_map=self.use_dbeta_map, output_dir=self.odir,
+                                                 use_dbeta_map=self.use_dbeta_map, deproj_dust=self.deproj_dust,
+                                                 deproj_dbeta=self.deproj_dbeta, output_dir=self.odir,
                                                  remove_files=True, debug=False)
             spectra = estimate_spectra_nilc(nilc_maps, self.minfo, self.ainfo)
         
