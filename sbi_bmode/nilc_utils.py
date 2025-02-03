@@ -100,14 +100,14 @@ def get_nilc_maps(pyilc_path, map_tmpdir, nsplit, nside, beta_dust, temp_dust, f
 
         #CMB-specific and dust-specific dictionaries
         cmb_param_dict = {'ILC_preserved_comp': 'CMB'}
+        cmb_param_dict.update(pyilc_input_params)
         if deproj_dust and deproj_dbeta:
             cmb_param_dict['ILC_deproj_comps'] = ['CIB','CIB_dbeta']
             cmb_param_dict['N_deproj'] = 2
         elif deproj_dust:
             cmb_param_dict['ILC_deproj_comps'] = ['CIB']
             cmb_param_dict['N_deproj'] = 1
-        dust_param_dict = {'ILC_preserved_comp': 'CIB'}
-        cmb_param_dict.update(pyilc_input_params) 
+        dust_param_dict = {'ILC_preserved_comp': 'CIB'} 
         dust_param_dict.update(pyilc_input_params)
         all_param_dicts = [cmb_param_dict, dust_param_dict]
         if use_dbeta_map:
