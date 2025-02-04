@@ -461,7 +461,7 @@ if __name__ == '__main__':
 
     parser.add_argument('--pyilcdir', default=None, help="Path to pyilc repository. "\
                         "Set to None to use multifrequency PS instead of NILC PS.")
-    parser.add_argument('--use_dbeta_map', default=False, help="Whether to build map of \
+    parser.add_argument('--use_dbeta_map', action='store_true', help="Whether to build map of \
                         1st moment w.r.t. beta. Only relevant if usng NILC PS.")
     parser.add_argument('--deproj_dust', default=False, help="Whether to deproject dust \
                        in CMB NILC map. Only relevant if usng NILC PS.")

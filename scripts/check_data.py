@@ -5,12 +5,12 @@ import matplotlib.pyplot as plt
 
 opj = os.path.join
 
-idir = '/mnt/ceph/users/aduivenvoorden/project/so/20240521_sbi_bmode/run13i'
+idir = '/mnt/ceph/users/aduivenvoorden/project/so/20240521_sbi_bmode/run20'
 imgdir = opj(idir, 'img')
 
 os.makedirs(imgdir, exist_ok=True)
 
-data_true = np.load(opj(idir, f'data_unnorm.npy'))
+data_true = np.load(opj(idir, f'data_norm.npy'))
 #data_true = np.load(opj(idir, f'data.npy'))
 
 fig, ax = plt.subplots(dpi=300)

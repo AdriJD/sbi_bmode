@@ -23,11 +23,15 @@ run13i  like run13g but with embedding network
 run13j  like run13h but more sims
 run13k  like run13i but more sims
 run13l  like run13g but with e-moped
+run13m	like run20c but with no dbeta map
 run14 	like run12 but with 6000 sims
 run15	like run12 but with 2000 sims?
 run16	like run12 but with FMPE
 run17	like run16 but with 3-rounds FMPE
 run18 	like run16 but with more simulations
 run19	like run09 but with e-MOPED
+run20	NILC + dbeta map, 3 x 5000 with NN compression
+run20b  like run20 but with more sims
+run20c  like run20b but with no NN compression
 
-checkcov00    check analytic cov with Monte-Carl
+checkcov00    check analytic cov with Monte-Carlo
