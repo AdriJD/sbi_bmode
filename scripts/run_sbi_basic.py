@@ -216,7 +216,8 @@ def get_true_params(params_dict):
     return true_params
 
 def main(odir, config, specdir, r_true, seed, n_train, n_samples, n_rounds, pyilcdir, use_dbeta_map,
-         deproj_dust, deproj_dbeta, no_norm=False, score_compress=False, embed=False, embed_num_layers=2,
+         deproj_dust, deproj_dbeta, fiducial_beta, fiducial_T_dust,
+         no_norm=False, score_compress=False, embed=False, embed_num_layers=2,
          embed_num_hiddens=25, fmpe=False, e_moped=False, n_moped=None):
     '''
     Run SBI.
@@ -251,6 +252,14 @@ def main(odir, config, specdir, r_true, seed, n_train, n_samples, n_rounds, pyil
     deproj_dbeta: Bool
         Only relevant if using nilc (pyilc dir is not None). Whether to
         deproject first moment of dust w.r.t. beta in CMB NILC map.
+    fiducial_beta: float, optional
+        Only relevant if using nilc (pyilc dir is not None). If not None,
+        use this value for beta when building nilc maps. Otherwise, use a separate value
+        for each simulation.
+    fiducial_T_dust: float, optional
+        Only relevant if using nilc (pyilc dir is not None). If not None,
+        use this value for T_dust when building nilc maps. Otherwise, use a separate value
+        for each simulation.
     no_norm : bool, optional
         Apply no normalization to the data vector.
     score_compress : bool, optional
@@ -314,7 +323,7 @@ def main(odir, config, specdir, r_true, seed, n_train, n_samples, n_rounds, pyil
 
     cmb_simulator = sim_utils.CMBSimulator(
         specdir, data_dict, fixed_params_dict, pyilcdir, use_dbeta_map, deproj_dust, deproj_dbeta,
-        odir, norm_params=norm_params, score_params=score_params)
+        fiducial_beta, fiducial_T_dust, odir, norm_params=norm_params, score_params=score_params)
 
     proposal = prior
 
@@ -449,14 +458,21 @@ if __name__ == '__main__':
     parser.add_argument('--odir')
     parser.add_argument('--config', help="Path to config yaml file.")
     parser.add_argument('--specdir')
+
     parser.add_argument('--pyilcdir', default=None, help="Path to pyilc repository. "\
                         "Set to None to use multifrequency PS instead of NILC PS.")
     parser.add_argument('--use_dbeta_map', default=False, help="Whether to build map of \
                         1st moment w.r.t. beta. Only relevant if usng NILC PS.")
-    parser.add_argument('--deproj_dust', default=False, help="Whether to derpoject dust \
+    parser.add_argument('--deproj_dust', default=False, help="Whether to deproject dust \
                        in CMB NILC map. Only relevant if usng NILC PS.")
-    parser.add_argument('--deproj_dbeta', default=False, help="Whether to derpoject first  \
+    parser.add_argument('--deproj_dbeta', default=False, help="Whether to deproject first  \
                     moment of dust w.r.t. beta in CMB NILC map. Only relevant if usng NILC PS.")
+    parser.add_argument('--fiducial_beta', type=float, default=None, help="If not None,  \
+                use this fiducial beta value to build NILC maps. If None, use the beta of \
+                each simulation rather than some fiducial value. Only relevant if using NILC PS.")
+    parser.add_argument('--fiducial_T_dust', type=float, default=None, help="If not None,  \
+            use this fiducial T_dust value to build NILC maps. If None, use the T_dust of \
+            each simulation rather than some fiducial value. Only relevant if using NILC PS.")
     
     parser.add_argument('--r_true', type=float, default=None, help="True value of r.")
     parser.add_argument('--seed', type=int, default=0,
@@ -495,7 +511,8 @@ if __name__ == '__main__':
     config = comm.bcast(config, root=0)
 
     main(odir, config, args.specdir, args.r_true, args.seed, args.n_train,
-         args.n_samples, args.n_rounds, args.pyilcdir, args.use_dbeta_map, args.deproj_dust, args.deproj_dbeta,
+         args.n_samples, args.n_rounds, args.pyilcdir, args.use_dbeta_map, args.deproj_dust, 
+         args.deproj_dbeta, args.fiducial_beta, args.fiducial_T_dust,
          no_norm=args.no_norm, score_compress=args.score_compress, embed=args.embed,
          embed_num_layers=args.embed_num_layers, embed_num_hiddens=args.embed_num_hiddens,
          fmpe=args.fmpe, e_moped=args.e_moped, n_moped=args.n_moped)

@@ -28,7 +28,8 @@ def write_maps(B_maps, output_dir=None):
 
 
 def get_nilc_maps(pyilc_path, map_tmpdir, nsplit, nside, beta_dust, temp_dust, freq_pivot_dust, 
-                  sat_central_freqs, sat_beam_fwhms, use_dbeta_map=False, deproj_dust=False, deproj_dbeta=False,
+                  sat_central_freqs, sat_beam_fwhms, use_dbeta_map=False, 
+                  deproj_dust=False, deproj_dbeta=False, fiducial_beta=None, fiducial_T_dust=None,
                   output_dir=None, remove_files=True, debug=False):
     '''
     Parameters
@@ -45,6 +46,12 @@ def get_nilc_maps(pyilc_path, map_tmpdir, nsplit, nside, beta_dust, temp_dust, f
     use_dbeta_map: Bool, whethert o build map of first moment w.r.t. beta
     deproj_dust: Bool, Whether to deproject dust in CMB NILC map.
     deproj_dbeta: Bool, Whether to deproject first moment of dust w.r.t. beta in CMB NILC map.
+    fiducial_beta: float, optional
+        If not None, use this value for beta when building nilc maps. Otherwise, use a 
+        separate value for each simulation.
+    fiducial_T_dust: float, optional
+        If not None, use this value for T_dust when building nilc maps. Otherwise, use a 
+        separate value for each simulation.
     output_dir: str, directory in which to make temporary directory for NILC maps
                 (if set to None, the default $TMPDIR will be used)
     remove_files: Bool, whether to remove files when they're no longer needed
@@ -93,6 +100,10 @@ def get_nilc_maps(pyilc_path, map_tmpdir, nsplit, nside, beta_dust, temp_dust, f
         #Dust parameters
         pars = {'beta_CIB': float(beta_dust), 'Tdust_CIB': float(temp_dust), 'nu0_CIB_ghz': float(freq_pivot_dust),
                 'kT_e_keV':5.0, 'nu0_radio_ghz':150.0, 'beta_radio': -0.5}
+        if fiducial_beta is not None:
+            pars['beta_CIB'] = float(fiducial_beta)
+        if fiducial_T_dust is not None:
+            pars['Tdust_CIB'] = float(fiducial_T_dust)
         dust_pars_yaml = f'{nilc_tmpdir}/dust_pars.yaml'
         with open(dust_pars_yaml, 'w') as outfile:
             yaml.dump(pars, outfile, default_flow_style=None)

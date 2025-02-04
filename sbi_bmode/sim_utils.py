@@ -38,6 +38,14 @@ class CMBSimulator():
     deproj_dbeta: Bool
         Only relevant if using nilc (pyilc dir is not None). Whether to
         deproject first moment of dust w.r.t. beta in CMB NILC map.
+    fiducial_beta: float, optional
+        Only relevant if using nilc (pyilc dir is not None). If not None,
+        use this value for beta when building nilc maps. Otherwise, use a separate value
+        for each simulation.
+    fiducial_T_dust: float, optional
+        Only relevant if using nilc (pyilc dir is not None). If not None,
+        use this value for T_dust when building nilc maps. Otherwise, use a separate value
+        for each simulation.
     odir: str
         Path to output directory
     norm_params: dict, optional
@@ -48,7 +56,8 @@ class CMBSimulator():
     '''
     
     def __init__(self, specdir, data_dict, fixed_params_dict, pyilcdir=None, use_dbeta_map=False,
-                deproj_dust=False, deproj_dbeta=False, odir=None, norm_params=None, score_params=None):
+                deproj_dust=False, deproj_dbeta=False, fiducial_beta=None, fiducial_T_dust=None,
+                odir=None, norm_params=None, score_params=None):
         
         self.lmax = data_dict['lmax']
         self.lmin = data_dict['lmin']
@@ -59,6 +68,8 @@ class CMBSimulator():
         self.use_dbeta_map = use_dbeta_map
         self.deproj_dust = deproj_dust
         self.deproj_dbeta = deproj_dbeta
+        self.fiducial_beta = fiducial_beta
+        self.fiducial_T_dust = fiducial_T_dust
         self.odir = odir
         self.bins = np.arange(self.lmin, self.lmax, self.delta_ell)
 
@@ -237,7 +248,8 @@ class CMBSimulator():
                                                  beta_dust, self.temp_dust, self.freq_pivot_dust, 
                                                  so_utils.sat_central_freqs, so_utils.sat_beam_fwhms,
                                                  use_dbeta_map=self.use_dbeta_map, deproj_dust=self.deproj_dust,
-                                                 deproj_dbeta=self.deproj_dbeta, output_dir=self.odir,
+                                                 deproj_dbeta=self.deproj_dbeta, fiducial_beta=self.fiducial_beta,
+                                                 fiducial_T_dust=self.fiducial_T_dust, output_dir=self.odir,
                                                  remove_files=True, debug=False)
             spectra = estimate_spectra_nilc(nilc_maps, self.minfo, self.ainfo)
         
