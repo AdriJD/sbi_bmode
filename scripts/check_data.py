@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 
 opj = os.path.join
 
-idir = '/mnt/ceph/users/aduivenvoorden/project/so/20240521_sbi_bmode/run20'
+idir = '/mnt/ceph/users/aduivenvoorden/project/so/20240521_sbi_bmode/run21'
 imgdir = opj(idir, 'img')
 
 os.makedirs(imgdir, exist_ok=True)
@@ -14,9 +14,11 @@ data_true = np.load(opj(idir, f'data_norm.npy'))
 #data_true = np.load(opj(idir, f'data.npy'))
 
 fig, ax = plt.subplots(dpi=300)
-for ridx in range(3):
-    data = np.load(opj(idir, f'data_draws_round_{ridx:03d}.npy'))
-
+for ridx in range(100):
+    try:
+        data = np.load(opj(idir, f'data_draws_round_{ridx:03d}.npy'))
+    except:
+        break
     nsim = data.shape[0]
     for idx in range(0,nsim,10):
         ax.plot(data[idx], color=f'C{ridx}', alpha=0.5, lw=0.5, label=f'round {ridx + 1}' if idx == 0 else None)
@@ -32,8 +34,11 @@ plt.close(fig)
     
 
 fig, ax = plt.subplots(dpi=300)
-for ridx in range(3):
-    data = np.load(opj(idir, f'data_draws_round_{ridx:03d}.npy'))
+for ridx in range(100):
+    try:
+        data = np.load(opj(idir, f'data_draws_round_{ridx:03d}.npy'))
+    except:
+        break
 
     nsim = data.shape[0]
     for idx in range(0,nsim,10):

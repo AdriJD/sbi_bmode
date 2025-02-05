@@ -115,9 +115,15 @@ def get_nilc_maps(pyilc_path, map_tmpdir, nsplit, nside, beta_dust, temp_dust, f
         if deproj_dust and deproj_dbeta:
             cmb_param_dict['ILC_deproj_comps'] = ['CIB','CIB_dbeta']
             cmb_param_dict['N_deproj'] = 2
+            cmb_oname = 'needletILCmap_component_CMB_deproject_CIB_CIB_dbeta'
         elif deproj_dust:
             cmb_param_dict['ILC_deproj_comps'] = ['CIB']
             cmb_param_dict['N_deproj'] = 1
+            cmb_oname = 'needletILCmap_component_CMB_deproject_CIB'            
+        elif deproj_dbeta:
+            raise ValueError("Cannot deproject dbeta without deprojecting dust")
+        else:
+            cmb_oname = 'needletILCmap_component_CMB'
         dust_param_dict = {'ILC_preserved_comp': 'CIB'} 
         dust_param_dict.update(pyilc_input_params)
         all_param_dicts = [cmb_param_dict, dust_param_dict]
@@ -141,7 +147,7 @@ def get_nilc_maps(pyilc_path, map_tmpdir, nsplit, nside, beta_dust, temp_dust, f
             subprocess.run([f"python {pyilc_path}/pyilc/main.py {all_yaml_files[c]}"], shell=True, env=env, stdout=stdout, stderr=stdout)
         
         #load NILC maps, then remove nilc tmpdir
-        cmb_nilc = hp.read_map(f'{nilc_tmpdir}/needletILCmap_component_CMB.fits')
+        cmb_nilc = hp.read_map(f'{nilc_tmpdir}/{cmb_oname}.fits')        
         #dust_nilc = 10**6*hp.read_map(f'{nilc_tmpdir}/needletILCmap_component_CIB.fits')
         dust_nilc = hp.read_map(f'{nilc_tmpdir}/needletILCmap_component_CIB.fits')        
         if use_dbeta_map:

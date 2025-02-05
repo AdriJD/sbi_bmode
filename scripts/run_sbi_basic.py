@@ -242,14 +242,14 @@ def main(odir, config, specdir, r_true, seed, n_train, n_samples, n_rounds, pyil
         Number of simulation rounds, if 1: NPE, if >1, SNPE.
     pyilcdir: str
         Path to pyilc repository. If None, nilc not performed.
-    use_dbeta_map: Bool
+    use_dbeta_map: bool
         Only relevant if using nilc (pyilc dir is not None). Whether
         to build map of first moment w.r.t. beta and include it in
         auto- and cross-spectra in the data vector
-    deproj_dust: Bool
+    deproj_dust: bool
         Only relevant if using nilc (pyilc dir is not None). Whether to
         deproject dust in CMB NILC map.
-    deproj_dbeta: Bool
+    deproj_dbeta: bool
         Only relevant if using nilc (pyilc dir is not None). Whether to
         deproject first moment of dust w.r.t. beta in CMB NILC map.
     fiducial_beta: float, optional
@@ -463,9 +463,9 @@ if __name__ == '__main__':
                         "Set to None to use multifrequency PS instead of NILC PS.")
     parser.add_argument('--use_dbeta_map', action='store_true', help="Whether to build map of \
                         1st moment w.r.t. beta. Only relevant if usng NILC PS.")
-    parser.add_argument('--deproj_dust', default=False, help="Whether to deproject dust \
+    parser.add_argument('--deproj_dust', action='store_true', help="Whether to deproject dust \
                        in CMB NILC map. Only relevant if usng NILC PS.")
-    parser.add_argument('--deproj_dbeta', default=False, help="Whether to deproject first  \
+    parser.add_argument('--deproj_dbeta', action='store_true', help="Whether to deproject first  \
                     moment of dust w.r.t. beta in CMB NILC map. Only relevant if usng NILC PS.")
     parser.add_argument('--fiducial_beta', type=float, default=None, help="If not None,  \
                 use this fiducial beta value to build NILC maps. If None, use the beta of \

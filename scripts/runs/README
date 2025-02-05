@@ -33,5 +33,9 @@ run19	like run09 but with e-MOPED
 run20	NILC + dbeta map, 3 x 5000 with NN compression
 run20b  like run20 but with more sims
 run20c  like run20b but with no NN compression
+run21   NILC + deproject dbeta, 6x5000
+run22   NILC + deproject dust, 6x5000
+run23   NILC + deproject dust + deproject dbeta, 6x5000
+run24   like run22 but with no cmb deprojection
 
 checkcov00    check analytic cov with Monte-Carlo
