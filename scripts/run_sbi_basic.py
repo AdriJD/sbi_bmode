@@ -401,3 +401,6 @@ if __name__ == '__main__':
          score_compress=args.score_compress, embed=args.embed,
          embed_num_layers=args.embed_num_layers, embed_num_hiddens=args.embed_num_hiddens,
          fmpe=args.fmpe, e_moped=args.e_moped, n_moped=args.n_moped)
+    
+    
+# mpiexec -n 1 python /home/sa5705/cca_project/scripts/run_sbi_basic.py --odir " /scratch/gpfs/SIMONSOBS/users/sa5705/sbi_outs/" --config "/home/sa5705/cca_project//home/sa5705/cca_project/scripts/configs/config10.yaml" --specdir <path_to_specdir> --r_true <true_value_of_r> --seed <random_seed> --n_train <number_of_training_samples> --n_samples <number_of_posterior_samples> --n_rounds <number_of_rounds> [--pyilcdir <path_to_pyilc_repository>] [--use_dbeta_map] [--score-compress] [--no-norm] [--embed] [--embed-num-layers <number_of_layers>] [--embed-num-hiddens <number_of_hidden_units>] [--fmpe] [--e-moped] [--n-moped <number_of_moped_sims>]

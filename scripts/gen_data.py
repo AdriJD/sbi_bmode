@@ -3,15 +3,22 @@ import os
 import numpy as np
 import matplotlib.pyplot as plt
 from pixell import curvedsky
+import sys
+sys.path.append('/home/sa5705/software/optweight/') #
 from optweight import map_utils
+#import map_utils
 
 from sbi_bmode import spectra_utils, sim_utils, so_utils
 
 opj = os.path.join
 
-datadir = '/mnt/home/aduivenvoorden/local/cca_project/data'
-imgdir = '/mnt/home/aduivenvoorden/project/so/20240402_sbi'
+#datadir = '/mnt/home/aduivenvoorden/local/cca_project/data'
+#imgdir = '/mnt/home/aduivenvoorden/project/so/20240402_sbi'
 
+datadir = '/scratch/gpfs/SIMONSOBS/users/sa5705/sbi_outs/data_20250123'
+imgdir = '/scratch/gpfs/SIMONSOBS/users/sa5705/sbi_outs/sbi_20250123'
+
+os.makedirs(datadir, exist_ok=True)
 os.makedirs(imgdir, exist_ok=True)
 
 lmax = 200
@@ -67,3 +74,6 @@ ax.set_yscale('log')
 ax.legend()
 fig.savefig(opj(imgdir, 'data'))
 plt.close(fig)
+
+
+# python /home/sa5705/cca_project/scripts/gen_data.py
