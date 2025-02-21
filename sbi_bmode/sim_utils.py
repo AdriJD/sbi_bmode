@@ -84,6 +84,13 @@ class CMBSimulator():
         # Fixed parameters.
         self.freq_pivot_dust = fixed_params_dict['freq_pivot_dust']
         self.temp_dust = fixed_params_dict['temp_dust']
+        
+        ## TEMP add params fixed for dbeta cls
+        # TODO: include in score_params?
+        # we want to marginalize over them 
+        # fiducial beta angular power spectrum amplitude and tilt
+        self.amp_beta_dust = 28
+        self.gamma_beta_dust = -2.42
 
         self.norm_params = norm_params
         if self.norm_params and pyilcdir is None:
@@ -178,7 +185,8 @@ class CMBSimulator():
 
         return cov_bin
         
-    def draw_data(self, r_tensor, A_lens, A_d_BB, alpha_d_BB, beta_dust, seed):
+    def draw_data(self, r_tensor, A_lens, A_d_BB, alpha_d_BB, beta_dust, 
+                  seed):
         '''
         Draw data realization.
 
@@ -298,7 +306,54 @@ class CMBSimulator():
 
         return data
     
-def gen_data(A_d_BB, alpha_d_BB, beta_dust, freq_pivot_dust, temp_dust,
+def get_delta_beta_cl(amp_beta_dust, gamma_beta_dust, amp, gamma, ls, l0=80., l_cutoff=2):
+    """
+    Returns power spectrum for spectral index fluctuations.
+    Args:
+        amp: amplitude
+        gamma: tilt
+        ls: array of ells
+        l0: pivot scale (default: 80)
+        l_cutoff: ell below which the power spectrum will be zero.
+            (default: 2).
+    Returns:
+        Array of Cls
+    """
+    ind_above = np.where(ls > l_cutoff)[0]
+    cls = np.zeros(len(ls))
+    cls[ind_above] = amp * (ls[ind_above] / l0)**gamma
+    return cls
+    
+def get_beta_map(npix, beta0, amp, gamma, l0=80, l_cutoff=2, seed=None):
+    """
+    Returns realization of the spectral index map.
+    Args:
+        nside: HEALPix resolution parameter.
+        beta0: mean spectral index.
+        amp: amplitude
+        gamma: tilt
+        l0: pivot scale (default: 80)
+        l_cutoff: ell below which the power spectrum will be zero.
+            (default: 2).
+        seed: seed (if None, a random seed will be used).
+        gaussian: beta map from power law spectrum (if False, a spectral 
+            index map obtained from the Planck data using the Commander code 
+            is used for dust, and ... for sync)  
+    Returns:
+        Spectral index map
+    """
+    if seed is not None:
+        np.random.seed(seed)
+    ls = np.arange(3*nside)
+    cls = get_delta_beta_cl(amp, gamma, ls, l0, l_cutoff)
+    nside = hp.npix2nside(npix)
+    mp = hp.synfast(cls, nside, verbose=False)
+    mp += beta0
+    return mp
+    
+def gen_data(A_d_BB, alpha_d_BB, 
+             beta_dust, amp_beta_dust, gamma_beta_dust, 
+             freq_pivot_dust, temp_dust,
              r_tensor, A_lens, freqs, seed, nsplit, cov_noise_ell,
              cov_scalar_ell, cov_tensor_ell, minfo, ainfo):
     '''
@@ -366,6 +421,9 @@ def gen_data(A_d_BB, alpha_d_BB, beta_dust, freq_pivot_dust, temp_dust,
     cmb_alm = alm_utils.rand_alm(cov_ell, ainfo, rng_cmb, dtype=np.complex128)
     dust_alm = alm_utils.rand_alm(cov_dust_ell, ainfo, rng_dust, dtype=np.complex128)
 
+    # Generate the dust beta map
+    beta_dust = get_beta_map(minfo.npix, beta_dust, amp_beta_dust, gamma_beta_dust)
+    
     for fidx, freq in enumerate(freqs):
         dust_factor = spectra_utils.get_sed_dust(
             freq, beta_dust, temp_dust, freq_pivot_dust)

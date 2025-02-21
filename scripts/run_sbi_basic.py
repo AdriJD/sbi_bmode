@@ -27,6 +27,8 @@ from sbi_bmode import sim_utils, script_utils, compress_utils
 opj = os.path.join
 comm = MPI.COMM_WORLD
 
+exit()
+
 def get_prior(params_dict):
     '''
     Parse parameter dictionary and return pytorch prior distribution.
