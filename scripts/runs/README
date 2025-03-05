@@ -12,11 +12,30 @@ run10	like run09 but with config10 (Different true values (not centered on prior
 run11	like run09 but with score compression
 run12	test run with pyilc and config09, 2000 sims
 run13	like run12 but with neural network compression
+run13b  like run13 but 5 rounds
+run13c  like run13b but smaller to debug draws
+run13d  like run13c but for multifreq case.
+run13e	like run13c but with no norm and embedding.
+run13f	like run13c but with norm and different units dust
+run13g	like run13f but after fixing normalization simple.
+run13h  like run13g but with more sims
+run13i  like run13g but with embedding network
+run13j  like run13h but more sims
+run13k  like run13i but more sims
+run13l  like run13g but with e-moped
+run13m	like run20c but with no dbeta map
 run14 	like run12 but with 6000 sims
 run15	like run12 but with 2000 sims?
 run16	like run12 but with FMPE
 run17	like run16 but with 3-rounds FMPE
 run18 	like run16 but with more simulations
 run19	like run09 but with e-MOPED
+run20	NILC + dbeta map, 3 x 5000 with NN compression
+run20b  like run20 but with more sims
+run20c  like run20b but with no NN compression
+run21   NILC + deproject dbeta, 6x5000
+run22   NILC + deproject dust, 6x5000
+run23   NILC + deproject dust + deproject dbeta, 6x5000
+run24   like run22 but with no cmb deprojection
 
-checkcov00    check analytic cov with Monte-Carl
+checkcov00    check analytic cov with Monte-Carlo
