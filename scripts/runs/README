@@ -39,4 +39,9 @@ run22   NILC + deproject dust, 6x5000
 run23   NILC + deproject dust + deproject dbeta, 6x5000
 run24   like run22 but with no cmb deprojection
 
+# PAPER NILC RUNS
+run25	Template for NILC SBI runs
+
+
+
 checkcov00    check analytic cov with Monte-Carlo
