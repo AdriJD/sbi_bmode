@@ -64,6 +64,10 @@ def get_nilc_maps(pyilc_path, map_tmpdir, nsplit, nside, beta_dust, temp_dust, f
                 the second index is for dust NILC maps
 
     '''
+    # In case beta is a map and not a float
+    if isinstance(beta_dust, np.ndarray):
+        beta_dust = float(np.mean(beta_dust))
+
     Ncomp = 2 if not use_dbeta_map else 3
     nilc_maps = np.zeros((nsplit, Ncomp, 12*nside**2), dtype=np.float32)
     
@@ -143,6 +147,12 @@ def get_nilc_maps(pyilc_path, map_tmpdir, nsplit, nside, beta_dust, temp_dust, f
 
         #run pyilc for each preserved component
         stdout = subprocess.DEVNULL if not debug else None
+        
+        print("Calling pyilc with:")
+        print(f"  input dir: {map_tmpdir}")
+        print(f"  beta: {beta_dust}, T_dust: {temp_dust}, pivot: {freq_pivot_dust}")
+        print(f"  deproj_dust={deproj_dust}, deproj_dbeta={deproj_dbeta}")
+
         for c, comp in enumerate(comps):
             subprocess.run([f"python {pyilc_path}/pyilc/main.py {all_yaml_files[c]}"], shell=True, env=env, stdout=stdout, stderr=stdout)
         

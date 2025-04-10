@@ -20,6 +20,9 @@ from sbi.utils.user_input_checks import (
 from sbi.neural_nets.embedding_nets import FCEmbedding
 from sbi.neural_nets import posterior_nn, flowmatching_nn
 
+import warnings
+warnings.filterwarnings("ignore")
+
 import sys
 sys.path.append('..')
 from sbi_bmode import sim_utils, script_utils, compress_utils
@@ -158,9 +161,15 @@ def simulate_for_sbi_mpi(simulator, proposal, param_names, num_sims, ndata, seed
         theta_dict = dict(zip(param_names, theta))
 
         draw = simulator.draw_data(
-            r_tensor=theta_dict['r_tensor'], A_lens=theta_dict['A_lens'],
-            A_d_BB=theta_dict['A_d_BB'], alpha_d_BB=theta_dict['alpha_d_BB'],
-            beta_dust=theta_dict['beta_dust'], seed=seed)
+            r_tensor=theta_dict['r_tensor'],
+            A_lens=theta_dict['A_lens'],
+            A_d_BB=theta_dict['A_d_BB'],
+            alpha_d_BB=theta_dict['alpha_d_BB'],
+            beta_dust=theta_dict['beta_dust'],
+            amp_beta_dust=theta_dict.get('amp_beta_dust'),
+            gamma_beta_dust=theta_dict.get('gamma_beta_dust'),
+            seed=seed)
+
 
         if mat_compress is not None:
             draw = np.dot(mat_compress, draw)
@@ -364,9 +373,15 @@ def main(odir, config, specdir, r_true, seed, n_train, n_samples, n_rounds, pyil
     # Define observations. Important that all ranks agree on this.
     if comm.rank == 0:
         x_obs = cmb_simulator.draw_data(
-            r_tensor=true_params['r_tensor'], A_lens=true_params['A_lens'],
-            A_d_BB=true_params['A_d_BB'], alpha_d_BB=true_params['alpha_d_BB'],
-            beta_dust=true_params['beta_dust'], seed=rng_sims)
+            r_tensor=true_params['r_tensor'],
+            A_lens=true_params['A_lens'],
+            A_d_BB=true_params['A_d_BB'],
+            alpha_d_BB=true_params['alpha_d_BB'],
+            beta_dust=true_params['beta_dust'],
+            amp_beta_dust=true_params.get('amp_beta_dust'),
+            gamma_beta_dust=true_params.get('gamma_beta_dust'),
+            seed=rng_sims)
+
     else:
         x_obs = None
     x_obs = comm.bcast(x_obs, root=0)
