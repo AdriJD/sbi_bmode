@@ -161,14 +161,14 @@ def simulate_for_sbi_mpi(simulator, proposal, param_names, num_sims, ndata, seed
         theta_dict = dict(zip(param_names, theta))
 
         draw = simulator.draw_data(
-            r_tensor=theta_dict['r_tensor'],
-            A_lens=theta_dict['A_lens'],
-            A_d_BB=theta_dict['A_d_BB'],
-            alpha_d_BB=theta_dict['alpha_d_BB'],
-            beta_dust=theta_dict['beta_dust'],
+            theta_dict['r_tensor'],
+            theta_dict['A_lens'],
+            theta_dict['A_d_BB'],
+            theta_dict['alpha_d_BB'],
+            theta_dict['beta_dust'],
+            seed,
             amp_beta_dust=theta_dict.get('amp_beta_dust'),
-            gamma_beta_dust=theta_dict.get('gamma_beta_dust'),
-            seed=seed)
+            gamma_beta_dust=theta_dict.get('gamma_beta_dust'))
 
         if mat_compress is not None:
             draw = np.dot(mat_compress, draw)
@@ -360,7 +360,6 @@ def main(odir, config, specdir, r_true, seed, n_train, n_samples, n_rounds, pyil
         # Ideally this would be done during the first round of inference
         # but easier for now to do here. We shouldn't need too many sims.
         n_norm = 128
-        #n_norm = 3 # NOTE NOTE
         _, x_norm = simulate_for_sbi_mpi(
             cmb_simulator, proposal, param_names, n_norm, data_size,
             rng_sims, comm, score_compress, mat_compress=mat_compress)
@@ -375,14 +374,14 @@ def main(odir, config, specdir, r_true, seed, n_train, n_samples, n_rounds, pyil
     # Define observations. Important that all ranks agree on this.
     if comm.rank == 0:
         x_obs = cmb_simulator.draw_data(
-            r_tensor=true_params['r_tensor'],
-            A_lens=true_params['A_lens'],
-            A_d_BB=true_params['A_d_BB'],
-            alpha_d_BB=true_params['alpha_d_BB'],
-            beta_dust=true_params['beta_dust'],
+            true_params['r_tensor'],
+            true_params['A_lens'],
+            true_params['A_d_BB'],
+            true_params['alpha_d_BB'],
+            true_params['beta_dust'],
+            rng_sims,
             amp_beta_dust=true_params.get('amp_beta_dust'),
-            gamma_beta_dust=true_params.get('gamma_beta_dust'),
-            seed=rng_sims)
+            gamma_beta_dust=true_params.get('gamma_beta_dust'))
 
     else:
         x_obs = None

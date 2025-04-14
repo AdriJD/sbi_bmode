@@ -124,6 +124,10 @@ class TruncatedNormal(TruncatedStandardNormal):
         self._variance = self._variance * self.scale ** 2
         self._entropy += self._log_scale
 
+    @constraints.dependent_property
+    def support(self):
+        return constraints.interval(self.a_orig, self.b_orig)
+        
     def _to_std_rv(self, value):
         return (value - self.loc) / self.scale
 

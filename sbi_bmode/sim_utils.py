@@ -199,7 +199,7 @@ class CMBSimulator():
         return cov_bin
         
     def draw_data(self, r_tensor, A_lens, A_d_BB, alpha_d_BB, beta_dust,
-                  amp_beta_dust, gamma_beta_dust, seed):
+                  seed, amp_beta_dust=None, gamma_beta_dust=None):
         '''
         Draw data realization.
 
@@ -217,6 +217,10 @@ class CMBSimulator():
             Dust frequency power law index.
         seed : int, np.random._generator.Generator object
             Seed or random number generator object.
+        amp_beta_dust : float, optional
+            Amplitude of dust beta power spectrum at pivot multipole.
+        gamma_beta_dust : float, optional
+            Tilt of dust beta power spectrum.            
 
         Returns
         -------
