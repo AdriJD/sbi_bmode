@@ -21,12 +21,12 @@ params:
     prior_params: [0.15]
     true_value: 0.01
   A_lens:
-    prior_type: "Normal"
-    prior_params: [1, 0.3]
+    prior_type: "TruncatedNormal"
+    prior_params: [1, 0.3, 0, 10]
     true_value: 1.05
   A_d_BB:
-    prior_type: "Normal"
-    prior_params: [5, 2]
+    prior_type: "TruncatedNormal"
+    prior_params: [5, 2, 0, 20]
     true_value: 4
   alpha_d_BB:
     prior_type: "Normal"
@@ -37,11 +37,11 @@ params:
     prior_params: [1.59, 0.11]
     true_value: 1.55
   amp_beta_dust:
-    prior_type: "Normal"
-    prior_params: [0.3, 0.5]
+    prior_type: "TruncatedNormal"
+    prior_params: [0.3, 0.5, 0, 1.59]
     true_value: 0.4
   gamma_beta_dust:
-    prior_type: "Normal"
-    prior_params: [-4., 0.5]
-    true_value: -3.5.
+    prior_type: "TruncatedNormal"
+    prior_params: [-4., 1., -6., -1.5]
+    true_value: -3.5
   

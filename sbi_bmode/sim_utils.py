@@ -239,11 +239,11 @@ class CMBSimulator():
             # build NILC B-mode maps with shape (nsplit, ncomp=2, npix)
             nfreq = len(self.freqs)
             B_maps = np.zeros((self.nsplit, nfreq, self.minfo.npix))
-            tmp_alm = np.zero((2, self.ainfo.nelem), dtype=np.complex128) # E, B temp.            
+            tmp_alm = np.zeros((2, self.ainfo.nelem), dtype=np.complex128) # E, B temp.            
             for split in range(self.nsplit):
                 for f, freq_str in enumerate(self.freq_strings):
-                    sht.map2alm(omap[split,f], tmp_alm, minfo, ainfo, 2)
-                    sht.alm2map(tmp_alm[1], B_maps[split,f], ainfo, minfo, 0)                    
+                    sht.map2alm(omap[split,f], tmp_alm, self.minfo, self.ainfo, 2)
+                    sht.alm2map(tmp_alm[1], B_maps[split,f], self.ainfo, self.minfo, 0)                    
 
             B_maps *= 1e-6
                     
@@ -638,7 +638,7 @@ def estimate_spectra_nilc(imap, minfo, ainfo):
     out = np.zeros((ntri, 1, ainfo.lmax + 1))
 
     alm = np.zeros((nsplit, ncomp, ainfo.nelem), dtype=np.complex128)
-    sht.map2alm(imap, alm, minfo, ainfo, 0)
+    sht.map2alm(imap.astype(np.float64, copy=False), alm, minfo, ainfo, 0)
 
     tri_indices = get_tri_indices(nsplit, ncomp)
     for idx, (sidx1, cidx1, sidx2, cidx2) in enumerate(tri_indices):

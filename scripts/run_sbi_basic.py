@@ -191,10 +191,12 @@ def simulate_for_sbi_mpi(simulator, proposal, param_names, num_sims, ndata, seed
 
     comm.Gatherv(
         sendbuf=thetas,
-        recvbuf=(thetas_full, np.array(num_sims_per_rank * ntheta, dtype=int), np.array(offsets_theta, dtype=int), MPI.DOUBLE), root=0)
+        recvbuf=(thetas_full, np.array(num_sims_per_rank * ntheta, dtype=int),
+                 np.array(offsets_theta, dtype=int), MPI.DOUBLE), root=0)
     comm.Gatherv(
         sendbuf=sims,
-        recvbuf=(sims_full, np.array(num_sims_per_rank * ndata, dtype=int), np.array(offsets_sims, dtype=int), MPI.DOUBLE), root=0)
+        recvbuf=(sims_full, np.array(num_sims_per_rank * ndata, dtype=int),
+                 np.array(offsets_sims, dtype=int), MPI.DOUBLE), root=0)
 
     if comm.rank == 0:
         thetas_full = torch.as_tensor(thetas_full.reshape(num_sims, ntheta).astype(np.float32))

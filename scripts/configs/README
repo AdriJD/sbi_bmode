@@ -4,3 +4,4 @@ config09	Config we used for most NILC SBI testing
 config10	Same as 09 but with perturbed true values
 config11	Similar to 09 but slighly broader priors, and slighly perturbed true values # USE FOR PAPER
 config12	Same as 11 but including gamma_beta_dust
+config13	more realistic gamma_beta_dust priors and true values

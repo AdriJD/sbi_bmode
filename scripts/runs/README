@@ -45,5 +45,6 @@ run25b	rerun of run25 with sa branch
 
 run26	Testing gamma_beta_dust
 run27	larger gamma_beta_dust run
+run28	Testing TruncatedNormal
 
 checkcov00    check analytic cov with Monte-Carlo
