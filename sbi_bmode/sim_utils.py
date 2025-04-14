@@ -239,12 +239,14 @@ class CMBSimulator():
             # build NILC B-mode maps with shape (nsplit, ncomp=2, npix)
             nfreq = len(self.freqs)
             B_maps = np.zeros((self.nsplit, nfreq, self.minfo.npix))
+            tmp_alm = np.zero((2, self.ainfo.nelem), dtype=np.complex128) # E, B temp.            
             for split in range(self.nsplit):
                 for f, freq_str in enumerate(self.freq_strings):
-                    Q, U = omap[split, f]
-                    # alm_T is just a placeholder                    
-                    alm_T, alm_E, alm_B = hp.map2alm([np.zeros_like(Q), Q, U], pol=True) 
-                    B_maps[split, f] = 10**(-6)*hp.alm2map(alm_B, self.nside)
+                    sht.map2alm(omap[split,f], tmp_alm, minfo, ainfo, 2)
+                    sht.alm2map(tmp_alm[1], B_maps[split,f], ainfo, minfo, 0)                    
+
+            B_maps *= 1e-6
+                    
             map_tmpdir = nilc_utils.write_maps(B_maps, output_dir=self.odir)
             nilc_maps = nilc_utils.get_nilc_maps(self.pyilcdir, map_tmpdir, self.nsplit, self.nside, 
                                                  self.fiducial_beta, self.fiducial_T_dust, self.freq_pivot_dust, 
