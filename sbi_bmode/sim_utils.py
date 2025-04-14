@@ -535,7 +535,8 @@ def get_ntri(nsplit, nfreq):
 def get_tri_indices(nsplit, nfreq):
     '''
     Get indices into upper-triangular part of the
-    (nsplits * nfreq) x (nsplits * nfreq) cross-spectrum matrix.
+    (nsplits * nfreq) x (nsplits * nfreq) cross-spectrum matrix,
+    while excluding combinations that share split indices.
 
     Parameters
     ----------
@@ -591,14 +592,12 @@ def estimate_spectra(imap, minfo, ainfo):
     Returns
     -------
     out : (ntri, 1, lmax + 1)
-        Output BB spectra. Only the elements of the upper-triangular part
-        of the (nsplits * nfreq) x (nsplits * nfreq) matrix are included.
+        Output BB spectra. See `get_tri_indices`.
     '''
 
     nsplit = imap.shape[0]
     nfreq = imap.shape[1]
 
-    # Number of elements in the upper triangle of the ntot x ntot matrix.
     ntri = get_ntri(nsplit, nfreq)
     out = np.zeros((ntri, 1, ainfo.lmax + 1))
 
@@ -615,12 +614,12 @@ def estimate_spectra(imap, minfo, ainfo):
 def estimate_spectra_nilc(imap, minfo, ainfo):
     '''
     Compute all the auto and cross-spectra between splits and
-    and frequency bands.
+    and components, while excluding combinations with the same split indices.
 
     Parameters
     ----------
-    imap : (nsplit, ncomp=2, npix)
-        Input maps.
+    imap : (nsplit, ncomp, npix)
+        Input B-mode maps.
     minfo : optweight.map_utils.MapInfo object
         Geometry of output map.
     ainfo : pixell.curvedsky.alm_info object
@@ -629,21 +628,21 @@ def estimate_spectra_nilc(imap, minfo, ainfo):
     Returns
     -------
     out : (ntri, 1, lmax + 1)
-        Output BB spectra. Only the elements of the upper-triangular part
-        (+ the diagonal) of the (nsplits * nfreq) x (nsplits * nfreq) matrix
-        are included.
+        Output BB spectra. See `get_tri_indices`.
     '''
 
     nsplit = imap.shape[0]
     ncomp = imap.shape[1]
 
-    # Number of elements in the upper triangle of the ntot x ntot matrix.
     ntri = get_ntri(nsplit, ncomp)
     out = np.zeros((ntri, 1, ainfo.lmax + 1))
 
+    alm = np.zeros((nsplit, ncomp, ainfo.nelem), dtype=np.complex128)
+    sht.map2alm(imap, alm, minfo, ainfo, 0)
+
     tri_indices = get_tri_indices(nsplit, ncomp)
-    for idx, (sidx1, fidx1, sidx2, fidx2) in enumerate(tri_indices):
-        out[idx, 0] = hp.anafast(imap[sidx1, fidx1], imap[sidx2, fidx2], lmax=ainfo.lmax)
+    for idx, (sidx1, cidx1, sidx2, cidx2) in enumerate(tri_indices):
+        out[idx,0] = ainfo.alm2cl(alm[sidx1,cidx1], alm2=alm[sidx2,cidx2])
 
     return out
 
