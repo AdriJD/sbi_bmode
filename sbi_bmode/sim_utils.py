@@ -39,13 +39,9 @@ class CMBSimulator():
         Only relevant if using nilc (pyilc dir is not None). Whether to
         deproject first moment of dust w.r.t. beta in CMB NILC map.
     fiducial_beta: float, optional
-        Only relevant if using nilc (pyilc dir is not None). If not None,
-        use this value for beta when building nilc maps. Otherwise, use a separate value
-        for each simulation.
+        Use this value for beta when building nilc maps.
     fiducial_T_dust: float, optional
-        Only relevant if using nilc (pyilc dir is not None). If not None,
-        use this value for T_dust when building nilc maps. Otherwise, use a separate value
-        for each simulation.
+        Use this value for T_dust when building nilc maps.
     odir: str
         Path to output directory
     norm_params: dict, optional
@@ -87,6 +83,9 @@ class CMBSimulator():
         if pyilcdir:
             self.ncomp = 2 if not self.use_dbeta_map else 3
             self.size_data = get_ntri(self.nsplit, self.ncomp) * (self.bins.size - 1)
+            if self.use_dbeta_map or self.deproj_dust or self.deproj_dbeta:
+                assert self.fiducial_beta is not None
+                assert self.fiducial_T_dust is not None            
         else:
             self.size_data = get_ntri(self.nsplit, self.nfreq) * (self.bins.size - 1)
 
@@ -118,14 +117,7 @@ class CMBSimulator():
                 self.lmax, self.nsplit, self.nfreq)
             self.sqrt_norm_cov = mat_utils.matpow(norm_cov, 0.5, return_diag=True)
             self.isqrt_norm_cov = mat_utils.matpow(norm_cov, -0.5, return_diag=True)  
-        
-        ## TEMP add params fixed for dbeta cls
-        # TODO: include in params
-        # we want to marginalize over them 
-        # fiducial beta angular power spectrum amplitude and tilt
-        #self.amp_beta_dust = 1.0e-4
-        #self.gamma_beta_dust = -2.42
-        
+                
         self.score_params = score_params
         if self.score_params and pyilcdir is None:
             
@@ -237,8 +229,8 @@ class CMBSimulator():
         seed = np.random.default_rng(seed=seed)
 
         omap = gen_data(
-+           A_d_BB, alpha_d_BB, beta_dust,
-+           amp_beta_dust, gamma_beta_dust,
+            A_d_BB, alpha_d_BB, beta_dust,
+            amp_beta_dust, gamma_beta_dust,
             self.freq_pivot_dust, self.temp_dust,
             r_tensor, A_lens, self.freqs, seed, self.nsplit, self.noise_cov_ell,
             self.cov_scalar_ell, self.cov_tensor_ell, self.minfo, self.ainfo)
@@ -254,14 +246,11 @@ class CMBSimulator():
                     alm_T, alm_E, alm_B = hp.map2alm([np.zeros_like(Q), Q, U], pol=True) 
                     B_maps[split, f] = 10**(-6)*hp.alm2map(alm_B, self.nside)
             map_tmpdir = nilc_utils.write_maps(B_maps, output_dir=self.odir)
-            print("nilc_tmpdir:", map_tmpdir)
-            print("Available files:", os.listdir(map_tmpdir))
             nilc_maps = nilc_utils.get_nilc_maps(self.pyilcdir, map_tmpdir, self.nsplit, self.nside, 
-                                                 beta_dust, self.temp_dust, self.freq_pivot_dust, 
+                                                 self.fiducial_beta, self.fiducial_T_dust, self.freq_pivot_dust, 
                                                  so_utils.sat_central_freqs, so_utils.sat_beam_fwhms,
                                                  use_dbeta_map=self.use_dbeta_map, deproj_dust=self.deproj_dust,
-                                                 deproj_dbeta=self.deproj_dbeta, fiducial_beta=self.fiducial_beta,
-                                                 fiducial_T_dust=self.fiducial_T_dust, output_dir=self.odir,
+                                                 deproj_dbeta=self.deproj_dbeta, output_dir=self.odir,
                                                  remove_files=True, debug=False)
             spectra = estimate_spectra_nilc(nilc_maps, self.minfo, self.ainfo)
         
@@ -324,40 +313,74 @@ class CMBSimulator():
 
         return data
     
-def get_delta_beta_cl(amp_beta_dust, gamma_beta_dust, ls, l0=80., l_cutoff=2):
-    """
+def get_delta_beta_cl(amp, gamma, lmax, ell_0=1, ell_cutoff=1):
+    '''
     Returns power spectrum for spectral index fluctuations.
-    Args:
-        amp: amplitude
-        gamma: tilt
-        ls: array of ells
-        l0: pivot scale (default: 80)
-        l_cutoff: ell below which the power spectrum will be zero.
-            (default: 2).
-    Returns:
-        Array of Cls
-    """
-    ind_above = np.where(ls > l_cutoff)[0]
-    cls = np.zeros(len(ls))
-    cls[ind_above] = amp_beta_dust * (ls[ind_above] / l0)**gamma_beta_dust
+    
+    Parameters
+    ----------
+    amp : float 
+        Amplitude at pivot multipole.
+    gamma : float
+        Tilt of power spectrum.
+    lmax : int
+        Maximum multipole
+    ell_0 : int, optional
+        Pivot multipole.
+    ell_cutoff : int, optional
+        Multipole below which the power spectrum will be zero.
+    
+    Returns
+    -------
+    c_ell_beta : (nell) array
+        Beta power spectrum
+    '''
+    
+    ells = np.arange(lmax + 1)
+    ind_above = np.where(ells > ell_cutoff)[0]
+    cls = np.zeros(len(ells))
+    cls[ind_above] = amp * (ells[ind_above] / ell_0) ** gamma
+    
     return cls
 
-def get_beta_map(npix, beta0, amp=None, gamma=None, l0=80, l_cutoff=2, seed=None):
-    """
+def get_beta_map(minfo, ainfo, beta0, amp, gamma, seed, ell_0=1, ell_cutoff=1):
+    '''   
     Returns realization of the spectral index map.
-    If amp or gamma is None, returns a constant map with value beta0.
-    """
-    if amp is None or gamma is None:
-        return beta0 #* np.ones(npix)
-    if seed is not None:
-        np.random.seed(seed)
-        
-    nside = hp.npix2nside(npix) 
-    ls = np.arange(3 * nside)
 
-    cls = get_delta_beta_cl(amp, gamma, ls, l0, l_cutoff)
-    mp = hp.synfast(cls, nside, verbose=False)
-    return mp + beta0
+    Parameters
+    ----------
+    minfo : optweight.map_utils.MapInfo object
+        Geometry of output map.
+    ainfo : pixell.curvedsky.alm_info object
+        Layout of spherical harmonic coefficients.
+    beta0 : float
+        Monopole of the beta map.
+    amp : float 
+        Amplitude at pivot multipole.
+    gamma : float
+        Tilt of power spectrum.
+    seed : numpy.random._generator.Generator object or int
+        Random number generator or seed for new random number generator.
+    ell_0 : int, optional
+        Pivot multipole.
+    ell_cutoff : int, optional
+        Multipole below which the power spectrum will be zero.
+    
+    Returns
+    -------
+    beta_map : (npix) array
+        Beta map, including monopole of beta.
+    '''
+    
+    seed = np.random.default_rng(seed=seed)
+        
+    cls = get_delta_beta_cl(amp, gamma, ainfo.lmax, ell_0, ell_cutoff)
+    alm_beta = alm_utils.rand_alm(cls, ainfo, seed, dtype=np.complex128)
+
+    map_beta = np.zeros((minfo.npix))
+    sht.alm2map(alm_beta, map_beta, ainfo, minfo, 0)
+    
+    return map_beta + beta0
 
 def gen_data(A_d_BB, alpha_d_BB, 
              beta_dust, amp_beta_dust, gamma_beta_dust, 
@@ -375,6 +398,10 @@ def gen_data(A_d_BB, alpha_d_BB,
         Dust spatial power law index.
     beta_dust : float
         Dust frequency power law index.
+    amp_beta_dust : float
+        Amplitude of dust beta power spectrum at pivot multipole.
+    gamma_beta_dust : float
+        Tilt of dust beta power spectrum.
     freq_pivot_dust : float
         Pivot frequency for the frequency power law.
     temp_dust : float
@@ -411,10 +438,11 @@ def gen_data(A_d_BB, alpha_d_BB,
 
     # Spawn rng for dust and noise.
     seed = np.random.default_rng(seed)
-    rngs = seed.spawn(2 + nsplit)
+    rngs = seed.spawn(3 + nsplit)
     rng_cmb = rngs[0]
     rng_dust = rngs[1]
-    rngs_noise = rngs[2:]
+    rng_beta = rngs[2]
+    rngs_noise = rngs[3:]
 
     # Generate the CMB spectra.
     cov_ell = spectra_utils.get_combined_cmb_spectrum(
@@ -429,34 +457,21 @@ def gen_data(A_d_BB, alpha_d_BB,
     cmb_alm = alm_utils.rand_alm(cov_ell, ainfo, rng_cmb, dtype=np.complex128)
     dust_alm = alm_utils.rand_alm(cov_dust_ell, ainfo, rng_dust, dtype=np.complex128)
 
+    # Create real-space dust map
+    dust_map = np.zeros((2, minfo.npix))
+    sht.alm2map(dust_alm, dust_map, ainfo, minfo, 2)
+    
     # Generate the dust beta map
-    beta_dust = get_beta_map(minfo.npix, beta_dust, amp_beta_dust, gamma_beta_dust)
+    beta_dust = get_beta_map(minfo, ainfo, beta_dust, amp_beta_dust, gamma_beta_dust, rng_beta)
     
     for fidx, freq in enumerate(freqs):
-        #dust_factor = spectra_utils.get_sed_dust(
-        #    freq, beta_dust, temp_dust, freq_pivot_dust)
-        #g_factor = spectra_utils.get_g_fact(freq)
-        #
-        #signal_alm = cmb_alm.copy()
-        #signal_alm += dust_alm * np.sqrt(dust_factor * np.abs(A_d_BB)) * g_factor * np.sign(A_d_BB)
-        #
-        ## If beta_d is a map and not an integer, then dust_factor is a map [npix]
-        ## i.e. if kept as above, trying to multiply a map with an alm won't work
+
         g_factor = spectra_utils.get_g_fact(freq)
-        # Create real-space dust map
-        dust_map = np.zeros((2, minfo.npix))
-        sht.alm2map(dust_alm, dust_map, ainfo, minfo, 2)
 
-        # Apply spatially varying SED scaling in real space
+        # Apply spatially varying SED scaling in real space.
         sed_map = spectra_utils.get_sed_dust(freq, beta_dust, temp_dust, freq_pivot_dust)
-        scaled_dust_map = dust_map * np.sqrt(np.abs(A_d_BB)) * sed_map * g_factor * np.sign(A_d_BB)
-
-        # Convert back to alms and add to CMB alms
-        dust_alm_scaled = np.zeros_like(cmb_alm)
-        sht.map2alm(scaled_dust_map, dust_alm_scaled, minfo, ainfo, 2)
-
+        scaled_dust_map = dust_map * np.sqrt(np.abs(A_d_BB) * sed_map) * g_factor * np.sign(A_d_BB)        
         signal_alm = cmb_alm.copy()
-        signal_alm += dust_alm_scaled
 
         for sidx in range(nsplit):
 
@@ -464,6 +479,7 @@ def gen_data(A_d_BB, alpha_d_BB,
                 cov_noise_ell[fidx], ainfo, rngs_noise[sidx], dtype=np.complex128)
             data_alm = np.asarray(data_alm, dtype=np.complex128)
             sht.alm2map(data_alm, out[sidx,fidx], ainfo, minfo, 2)
+            out[sidx,fidx] += scaled_dust_map
 
     return out
 

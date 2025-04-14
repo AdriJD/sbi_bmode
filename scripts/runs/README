@@ -41,7 +41,9 @@ run24   like run22 but with no cmb deprojection
 
 # PAPER NILC RUNS
 run25	Template for NILC SBI runs
+run25b	rerun of run25 with sa branch
 
-
+run26	Testing gamma_beta_dust
+run27	larger gamma_beta_dust run
 
 checkcov00    check analytic cov with Monte-Carlo

@@ -20,12 +20,10 @@ from sbi.utils.user_input_checks import (
 from sbi.neural_nets.embedding_nets import FCEmbedding
 from sbi.neural_nets import posterior_nn, flowmatching_nn
 
-import warnings
-warnings.filterwarnings("ignore")
-
 import sys
 sys.path.append('..')
-from sbi_bmode import sim_utils, script_utils, compress_utils
+from sbi_bmode import (
+    sim_utils, script_utils, compress_utils, custom_distributions)
 
 opj = os.path.join
 comm = MPI.COMM_WORLD
@@ -105,6 +103,8 @@ def get_prior(params_dict):
             prior.append(Normal(*prior_dict['prior_params']))
         elif prior_dict['prior_type'].lower() == 'halfnormal':
             prior.append(HalfNormal(*prior_dict['prior_params']))
+        elif prior_dict['prior_type'].lower() == 'truncatednormal':
+            prior.append(custom_distributions.TruncatedNormal(*prior_dict['prior_params']))            
         else:
             raise ValueError(f"{prior_dict['prior_type']=} not understood")
         param_names.append(param)
@@ -157,7 +157,7 @@ def simulate_for_sbi_mpi(simulator, proposal, param_names, num_sims, ndata, seed
     sims = np.zeros((num_sims_per_rank[comm.rank], ndata))
 
     for idx, theta in enumerate(thetas):
-        #print(comm.rank, idx)
+        print(f'{comm.rank=}, {idx=}, {theta=}')
         theta_dict = dict(zip(param_names, theta))
 
         draw = simulator.draw_data(
@@ -169,7 +169,6 @@ def simulate_for_sbi_mpi(simulator, proposal, param_names, num_sims, ndata, seed
             amp_beta_dust=theta_dict.get('amp_beta_dust'),
             gamma_beta_dust=theta_dict.get('gamma_beta_dust'),
             seed=seed)
-
 
         if mat_compress is not None:
             draw = np.dot(mat_compress, draw)
@@ -359,6 +358,7 @@ def main(odir, config, specdir, r_true, seed, n_train, n_samples, n_rounds, pyil
         # Ideally this would be done during the first round of inference
         # but easier for now to do here. We shouldn't need too many sims.
         n_norm = 128
+        #n_norm = 3 # NOTE NOTE
         _, x_norm = simulate_for_sbi_mpi(
             cmb_simulator, proposal, param_names, n_norm, data_size,
             rng_sims, comm, score_compress, mat_compress=mat_compress)
