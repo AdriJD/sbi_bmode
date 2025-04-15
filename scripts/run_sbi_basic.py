@@ -16,6 +16,7 @@ from sbi.utils.user_input_checks import (
     check_sbi_inputs,
     process_prior,
     process_simulator,
+    MultipleIndependent
 )
 from sbi.neural_nets.embedding_nets import FCEmbedding
 from sbi.neural_nets import posterior_nn, flowmatching_nn
@@ -50,7 +51,7 @@ def normalize_simple(data, data_mean, data_std):
     shape = data.shape
     if data.ndim == 1:
         data = data[np.newaxis,:]
-    
+
     return ((data - data_mean) / data_std).reshape(shape)
 
 def unnormalize_simple(data_norm, data_mean, data_std):
@@ -69,13 +70,13 @@ def unnormalize_simple(data_norm, data_mean, data_std):
     Returns
     -------
     data : (nsim, ndata) array
-        Unnormalized data.    
+        Unnormalized data.
     '''
 
     shape = data_norm.shape
     if data_norm.ndim == 1:
         data_norm = data_norm[np.newaxis,:]
-        
+
     return (data_norm * data_std + data_mean).reshape(shape)
 
 def get_prior(params_dict):
@@ -104,13 +105,15 @@ def get_prior(params_dict):
         elif prior_dict['prior_type'].lower() == 'halfnormal':
             prior.append(HalfNormal(*prior_dict['prior_params']))
         elif prior_dict['prior_type'].lower() == 'truncatednormal':
-            prior.append(custom_distributions.TruncatedNormal(*prior_dict['prior_params']))            
+            prior.append(custom_distributions.TruncatedNormal(*prior_dict['prior_params']))
         else:
             raise ValueError(f"{prior_dict['prior_type']=} not understood")
         param_names.append(param)
 
     # sbi needs the distributions to not be scalar.
-    return [p.expand(torch.Size([1])) for p in prior], param_names
+    #return [p.expand(torch.Size([1])) for p in prior], param_names
+    prior_list = [p.expand(torch.Size([1])) for p in prior]
+    return MultipleIndependent(prior_list), param_names
 
 def simulate_for_sbi_mpi(simulator, proposal, param_names, num_sims, ndata, seed, comm,
                          score_compress, mat_compress=None):
@@ -309,7 +312,7 @@ def main(odir, config, specdir, r_true, seed, n_train, n_samples, n_rounds, pyil
     prior, num_parameters, prior_returns_numpy = process_prior(prior)
 
     print(f'{prior.mean=}')
-    print(f'{prior.stddev=}')    
+    print(f'{prior.stddev=}')
     mean_dict = {}
     for idx, name in enumerate(param_names):
         mean_dict[name] = float(prior.mean[idx])
@@ -317,10 +320,10 @@ def main(odir, config, specdir, r_true, seed, n_train, n_samples, n_rounds, pyil
     norm_params = None
     norm_simple = False
     if not pyilcdir and not no_norm:
-        norm_params = mean_dict         
+        norm_params = mean_dict
     elif pyilcdir and not no_norm:
         norm_simple = True
-        
+
     if r_true is not None:
         params_dict['r_tensor']['true_value'] = r_true
     true_params = get_true_params(params_dict)
@@ -349,12 +352,12 @@ def main(odir, config, specdir, r_true, seed, n_train, n_samples, n_rounds, pyil
         del theta, x
         mat_compress = comm.bcast(mat_compress, root=0)
         data_size = num_parameters
-        
+
     elif score_compress:
         data_size = num_parameters
     else:
         data_size = cmb_simulator.size_data
-        
+
     if norm_simple:
         # Draw some simulations from the prior to find a normalization.
         # Ideally this would be done during the first round of inference
@@ -365,12 +368,12 @@ def main(odir, config, specdir, r_true, seed, n_train, n_samples, n_rounds, pyil
             rng_sims, comm, score_compress, mat_compress=mat_compress)
         if comm.rank == 0:
             data_mean = np.mean(np.asarray(x_norm), axis=0)
-            data_std = np.std(np.asarray(x_norm), axis=0)        
+            data_std = np.std(np.asarray(x_norm), axis=0)
         else:
             data_mean, data_std = None, None
         data_mean = comm.bcast(data_mean, root=0)
         data_std = comm.bcast(data_std, root=0)
-        
+
     # Define observations. Important that all ranks agree on this.
     if comm.rank == 0:
         x_obs = cmb_simulator.draw_data(
@@ -386,7 +389,7 @@ def main(odir, config, specdir, r_true, seed, n_train, n_samples, n_rounds, pyil
     else:
         x_obs = None
     x_obs = comm.bcast(x_obs, root=0)
-    
+
     x_obs_full = x_obs.copy() # We always want to save the full data vector.
 
     if e_moped:
@@ -398,7 +401,7 @@ def main(odir, config, specdir, r_true, seed, n_train, n_samples, n_rounds, pyil
 
     if norm_simple:
         x_obs = normalize_simple(x_obs, data_mean, data_std)
-        
+
     if embed:
         embedding_net = FCEmbedding(
            input_dim=x_obs.size,
@@ -427,10 +430,10 @@ def main(odir, config, specdir, r_true, seed, n_train, n_samples, n_rounds, pyil
 
             if norm_simple:
                 x = normalize_simple(x, torch.as_tensor(data_mean), torch.as_tensor(data_std))
-            
+
             print(f'param draws : {theta}')
             print(f'data draws : {x}')
-                       
+
             # Save parameters and data draws to disk for debugging.
             np.save(opj(odir, f'param_draws_round_{ridx:03d}'), np.asarray(theta))
             np.save(opj(odir, f'data_draws_round_{ridx:03d}'), np.asarray(x))
@@ -465,7 +468,9 @@ def main(odir, config, specdir, r_true, seed, n_train, n_samples, n_rounds, pyil
             np.save(opj(odir, 'data.npy'), x_obs_full)
         with open(opj(odir, 'config.yaml'), "w") as handle:
             yaml.safe_dump(config, handle)
-
+        np.save(opj(odir, 'training_loss.npy'), np.asarray(inference.summary['training_loss']))
+        np.save(opj(odir, 'validation_loss.npy'), np.asarray(inference.summary['validation_loss']))
+            
     comm.Barrier()
 
 if __name__ == '__main__':
@@ -489,7 +494,7 @@ if __name__ == '__main__':
     parser.add_argument('--fiducial_T_dust', type=float, default=None, help="If not None,  \
             use this fiducial T_dust value to build NILC maps. If None, use the T_dust of \
             each simulation rather than some fiducial value. Only relevant if using NILC PS.")
-    
+
     parser.add_argument('--r_true', type=float, default=None, help="True value of r.")
     parser.add_argument('--seed', type=int, default=0,
                         help="Random seed for the training data.")
@@ -527,11 +532,11 @@ if __name__ == '__main__':
     config = comm.bcast(config, root=0)
 
     main(odir, config, args.specdir, args.r_true, args.seed, args.n_train,
-         args.n_samples, args.n_rounds, args.pyilcdir, args.use_dbeta_map, args.deproj_dust, 
+         args.n_samples, args.n_rounds, args.pyilcdir, args.use_dbeta_map, args.deproj_dust,
          args.deproj_dbeta, args.fiducial_beta, args.fiducial_T_dust,
          no_norm=args.no_norm, score_compress=args.score_compress, embed=args.embed,
          embed_num_layers=args.embed_num_layers, embed_num_hiddens=args.embed_num_hiddens,
          fmpe=args.fmpe, e_moped=args.e_moped, n_moped=args.n_moped)
-    
-    
+
+
 # mpiexec -n 1 python /home/sa5705/cca_project/scripts/run_sbi_basic.py --odir " /scratch/gpfs/SIMONSOBS/users/sa5705/sbi_outs/" --config "/home/sa5705/cca_project//home/sa5705/cca_project/scripts/configs/config10.yaml" --specdir <path_to_specdir> --r_true <true_value_of_r> --seed <random_seed> --n_train <number_of_training_samples> --n_samples <number_of_posterior_samples> --n_rounds <number_of_rounds> [--pyilcdir <path_to_pyilc_repository>] [--use_dbeta_map] [--score-compress] [--no-norm] [--embed] [--embed-num-layers <number_of_layers>] [--embed-num-hiddens <number_of_hidden_units>] [--fmpe] [--e-moped] [--n-moped <number_of_moped_sims>]
