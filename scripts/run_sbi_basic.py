@@ -1,4 +1,5 @@
 import os
+import errno
 import yaml
 import pickle
 import argparse
@@ -28,6 +29,27 @@ from sbi_bmode import (
 
 opj = os.path.join
 comm = MPI.COMM_WORLD
+
+def symlink_force(target, link_name):
+    '''
+    Create a symlink, overwrite existing link if present.
+
+    Parameters
+    ----------
+    target : str
+        Path to target.
+    link_name : str
+        Path to symlink.    
+    '''
+    
+    try:
+        os.symlink(target, link_name)
+    except OSError as e:
+        if e.errno == errno.EEXIST:
+            os.remove(link_name)
+            os.symlink(target, link_name)
+        else:
+            raise e
 
 def normalize_simple(data, data_mean, data_std):
     '''
@@ -231,7 +253,7 @@ def get_true_params(params_dict):
 def main(odir, config, specdir, r_true, seed, n_train, n_samples, n_rounds, pyilcdir, use_dbeta_map,
          deproj_dust, deproj_dbeta, fiducial_beta, fiducial_T_dust,
          no_norm=False, score_compress=False, embed=False, embed_num_layers=2,
-         embed_num_hiddens=25, fmpe=False, e_moped=False, n_moped=None):
+         embed_num_hiddens=25, fmpe=False, e_moped=False, n_moped=None, density_estimator_type='maf'):
     '''
     Run SBI.
 
@@ -289,6 +311,8 @@ def main(odir, config, specdir, r_true, seed, n_train, n_samples, n_rounds, pyil
         Use e-MOPED compression for the data vector.
     n_moped : int, optional
         Number of simulations used for e-MOPED compression matrix.
+    density_estimator_type : str, optional
+        String denoting density estimator for NPE.
     '''
 
     if score_compress and e_moped:
@@ -408,7 +432,8 @@ def main(odir, config, specdir, r_true, seed, n_train, n_samples, n_rounds, pyil
            output_dim=num_parameters,
            num_layers=embed_num_layers,
            num_hiddens=embed_num_hiddens)
-        neural_posterior = posterior_nn(model="maf", embedding_net=embedding_net)
+        neural_posterior = posterior_nn(model=density_estimator_type,
+                                        embedding_net=embedding_net)
         inference = SNPE(prior=prior, density_estimator=neural_posterior)
     elif fmpe:
         net_builder = flowmatching_nn(
@@ -418,7 +443,8 @@ def main(odir, config, specdir, r_true, seed, n_train, n_samples, n_rounds, pyil
         )
         inference = FMPE(prior, density_estimator=net_builder)
     else:
-        inference = SNPE(prior, density_estimator='maf')
+        neural_posterior = posterior_nn(model=density_estimator_type)
+        inference = SNPE(prior, density_estimator=neural_posterior)
 
     # Train the SNPE.
     for ridx in range(n_rounds):
@@ -449,14 +475,15 @@ def main(odir, config, specdir, r_true, seed, n_train, n_samples, n_rounds, pyil
 
             posterior = inference.build_posterior(density_estimator)
             proposal = posterior.set_default_x(x_obs)
+            samples = posterior.sample((n_samples,), x=x_obs)
+            np.save(opj(odir, f'samples_round_{ridx:03d}.npy'), samples)
 
         proposal = comm.bcast(proposal, root=0)
 
     if comm.rank == 0:
         with open(opj(odir, 'posterior.pkl'), "wb") as handle:
             pickle.dump(posterior, handle)
-        samples = posterior.sample((n_samples,), x=x_obs)
-        np.save(opj(odir, 'samples.npy'), samples)
+        symlink_force(opj(odir, f'samples_round_{ridx:03d}.npy'), opj(odir, f'samples.npy'))
         np.save(opj(odir, 'data_uncompressed.npy'), x_obs_full)
         if norm_params:
             np.save(opj(odir, 'data_norm.npy'), x_obs)
@@ -515,7 +542,9 @@ if __name__ == '__main__':
     parser.add_argument('--e-moped', action='store_true', help="Use e-MOPED to compress the data vector")
     parser.add_argument('--n-moped', type=int, help="Number of sims used to estimate e-moped matrix",
                         default=1000)
-
+    parser.add_argument('--density-estimator-type', type=str, default='maf',
+                        help="pick from 'nsf', 'maf', 'mdn', 'made', 'zuko_maf' or 'zuko_nsf'")
+                        
     args = parser.parse_args()
 
     odir = args.odir
@@ -536,7 +565,5 @@ if __name__ == '__main__':
          args.deproj_dbeta, args.fiducial_beta, args.fiducial_T_dust,
          no_norm=args.no_norm, score_compress=args.score_compress, embed=args.embed,
          embed_num_layers=args.embed_num_layers, embed_num_hiddens=args.embed_num_hiddens,
-         fmpe=args.fmpe, e_moped=args.e_moped, n_moped=args.n_moped)
-
-
-# mpiexec -n 1 python /home/sa5705/cca_project/scripts/run_sbi_basic.py --odir " /scratch/gpfs/SIMONSOBS/users/sa5705/sbi_outs/" --config "/home/sa5705/cca_project//home/sa5705/cca_project/scripts/configs/config10.yaml" --specdir <path_to_specdir> --r_true <true_value_of_r> --seed <random_seed> --n_train <number_of_training_samples> --n_samples <number_of_posterior_samples> --n_rounds <number_of_rounds> [--pyilcdir <path_to_pyilc_repository>] [--use_dbeta_map] [--score-compress] [--no-norm] [--embed] [--embed-num-layers <number_of_layers>] [--embed-num-hiddens <number_of_hidden_units>] [--fmpe] [--e-moped] [--n-moped <number_of_moped_sims>]
+         fmpe=args.fmpe, e_moped=args.e_moped, n_moped=args.n_moped,
+         density_estimator_type=args.density_estimator_type)

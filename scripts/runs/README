@@ -46,5 +46,8 @@ run25b	rerun of run25 with sa branch
 run26	Testing gamma_beta_dust
 run27	larger gamma_beta_dust run
 run28	Testing TruncatedNormal
+run29	like run28 but less simulations
+run29b	Same as run29 with using nsf instead of maf
+run30 	like run28, but only one round of 5376 sims
 
 checkcov00    check analytic cov with Monte-Carlo
