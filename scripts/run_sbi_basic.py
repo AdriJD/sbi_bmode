@@ -250,8 +250,8 @@ def get_true_params(params_dict):
 
     return true_params
 
-def main(odir, config, specdir, r_true, seed, n_train, n_samples, n_rounds, pyilcdir, use_dbeta_map,
-         deproj_dust, deproj_dbeta, fiducial_beta, fiducial_T_dust,
+def main(odir, config, specdir, r_true, seed, n_train, n_samples, n_rounds, pyilcdir, use_dust_map,
+         use_dbeta_map, deproj_dust, deproj_dbeta, fiducial_beta, fiducial_T_dust,
          no_norm=False, score_compress=False, embed=False, embed_num_layers=2,
          embed_num_hiddens=25, fmpe=False, e_moped=False, n_moped=None, density_estimator_type='maf'):
     '''
@@ -277,6 +277,10 @@ def main(odir, config, specdir, r_true, seed, n_train, n_samples, n_rounds, pyil
         Number of simulation rounds, if 1: NPE, if >1, SNPE.
     pyilcdir: str
         Path to pyilc repository. If None, nilc not performed.
+    use_dust_map: bool
+        Only relevant if using nilc (pyilc dir is not None). Whether
+        to build map of dust and include it in
+        auto- and cross-spectra in the data vector    
     use_dbeta_map: bool
         Only relevant if using nilc (pyilc dir is not None). Whether
         to build map of first moment w.r.t. beta and include it in
@@ -359,8 +363,10 @@ def main(odir, config, specdir, r_true, seed, n_train, n_samples, n_rounds, pyil
         score_params = None
 
     cmb_simulator = sim_utils.CMBSimulator(
-        specdir, data_dict, fixed_params_dict, pyilcdir, use_dbeta_map, deproj_dust, deproj_dbeta,
-        fiducial_beta, fiducial_T_dust, odir, norm_params=norm_params, score_params=score_params)
+        specdir, data_dict, fixed_params_dict, pyilcdir=pyilcdir, use_dust_map=use_dust_map,
+        use_dbeta_map=use_dbeta_map, deproj_dust=deproj_dust, deproj_dbeta=deproj_dbeta,
+        fiducial_beta=fiducial_beta, fiducial_T_dust=fiducial_T_dust, odir=odir,
+        norm_params=norm_params, score_params=score_params)
 
     proposal = prior
 
@@ -521,6 +527,8 @@ if __name__ == '__main__':
     parser.add_argument('--fiducial_T_dust', type=float, default=None, help="If not None,  \
             use this fiducial T_dust value to build NILC maps. If None, use the T_dust of \
             each simulation rather than some fiducial value. Only relevant if using NILC PS.")
+    parser.add_argument('--no-dust-map', action='store_true', help="Whether to build map of \
+                        dust. Only relevant if usng NILC PS.")
 
     parser.add_argument('--r_true', type=float, default=None, help="True value of r.")
     parser.add_argument('--seed', type=int, default=0,
@@ -561,8 +569,8 @@ if __name__ == '__main__':
     config = comm.bcast(config, root=0)
 
     main(odir, config, args.specdir, args.r_true, args.seed, args.n_train,
-         args.n_samples, args.n_rounds, args.pyilcdir, args.use_dbeta_map, args.deproj_dust,
-         args.deproj_dbeta, args.fiducial_beta, args.fiducial_T_dust,
+         args.n_samples, args.n_rounds, args.pyilcdir, not args.no_dust_map, args.use_dbeta_map,
+         args.deproj_dust, args.deproj_dbeta, args.fiducial_beta, args.fiducial_T_dust,
          no_norm=args.no_norm, score_compress=args.score_compress, embed=args.embed,
          embed_num_layers=args.embed_num_layers, embed_num_hiddens=args.embed_num_hiddens,
          fmpe=args.fmpe, e_moped=args.e_moped, n_moped=args.n_moped,

@@ -49,5 +49,13 @@ run28	Testing TruncatedNormal
 run29	like run28 but less simulations
 run29b	Same as run29 with using nsf instead of maf
 run30 	like run28, but only one round of 5376 sims
+run31	like run30 but just using 2304 simulations
+run32a	like run30, but 2x sims, cmb + dust
+run32b	like run30, but 2x sims, cmb + dust + dbeta
+run32c	like run30, but 2x sims, cmb + dust + dbeta + deprojection dust
+run32d	like run30, but 2x sims, cmb + dust + dbeta + deprojection dust + deprojection dbeta 
+run33a	like run30, but 2x sims, cmb
+run33b	like run30, but 2x sims, cmb + deprojection dust
+run33c	like run30, but 2x sims, cmb + deprojection dust + deprojection dbeta
 
 checkcov00    check analytic cov with Monte-Carlo

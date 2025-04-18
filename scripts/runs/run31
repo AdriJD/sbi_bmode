@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=run30
+#SBATCH --job-name=run31
 #SBATCH --partition=preempt
 ##SBATCH --partition=gen
 #SBATCH --qos=preempt
@@ -19,7 +19,7 @@ module load adri_gcc
 module load adri_base
 source /mnt/home/aduivenvoorden/.pyenv/versions/enki/bin/activate
 
-TAG=run30
+TAG=run31
 ANADIR=/mnt/home/aduivenvoorden/local/cca_project/scripts
 ODIR=/mnt/home/aduivenvoorden/project/so/20240521_sbi_bmode/${TAG}
 SPECDIR=/mnt/home/aduivenvoorden/local/cca_project/data
@@ -33,11 +33,11 @@ export JAX_DEBUG_NANS=True
 export JAX_PLATFORMS=cpu 
 
 NROUNDS=1
-NTRAIN_PER_ROUND=5376
+NTRAIN_PER_ROUND=2304
 #NTRAIN_PER_ROUND=128
 FID_BETA=1.5
 FID_T=19.6
 
 srun -u --cpu-bind=cores -c $SLURM_CPUS_PER_TASK python ${ANADIR}/run_sbi_basic.py --odir ${ODIR} --config ${CONFIG} --specdir ${SPECDIR} --n_train ${NTRAIN_PER_ROUND} --n_samples 50000 --n_rounds ${NROUNDS} --pyilcdir ${PYILCDIR} --fiducial_beta ${FID_BETA} --fiducial_T_dust ${FID_T} --deproj_dust --deproj_dbeta --use_dbeta_map
 
-cp ./slurm-${SLURM_JOB_ID}.out ${ODIR}/
+cp ./slurm-${SLURM_JOB_ID}.out ${ODIR}

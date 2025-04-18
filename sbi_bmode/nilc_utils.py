@@ -28,7 +28,7 @@ def write_maps(B_maps, output_dir=None):
 
 
 def get_nilc_maps(pyilc_path, map_tmpdir, nsplit, nside, fiducial_beta, fiducial_T_dust, freq_pivot_dust, 
-                  sat_central_freqs, sat_beam_fwhms, use_dbeta_map=False, 
+                  sat_central_freqs, sat_beam_fwhms, use_dust_map=True, use_dbeta_map=False, 
                   deproj_dust=False, deproj_dbeta=False,
                   output_dir=None, remove_files=True, debug=False):
     '''
@@ -43,6 +43,7 @@ def get_nilc_maps(pyilc_path, map_tmpdir, nsplit, nside, fiducial_beta, fiducial
     freq_pivot_dust: float, pivot frequency of dust
     sat_central_freqs: dict, maps frequency strings to floats representing frequencies
     sat_beam_fwhms: dict, maps frequency strings to floats representing beam FWHM
+    use_dust_map: Bool, whether to produce dust map.
     use_dbeta_map: Bool, whethert o build map of first moment w.r.t. beta
     deproj_dust: Bool, Whether to deproject dust in CMB NILC map.
     deproj_dbeta: Bool, Whether to deproject first moment of dust w.r.t. beta in CMB NILC map.
@@ -53,13 +54,18 @@ def get_nilc_maps(pyilc_path, map_tmpdir, nsplit, nside, fiducial_beta, fiducial
 
     Returns
     -------
-    nilc_maps: (nsplit, ncomp=2 or 3, npix) ndarray containing NILC maps
+    nilc_maps: (nsplit, ncomp=1, 2 or 3, npix) ndarray containing NILC maps
                 For ncomp, the first index is for CMB NILC maps and 
-                the second index is for dust NILC maps
-
+                the second index is for dust NILC maps.
     '''
 
-    Ncomp = 2 if not use_dbeta_map else 3
+    if not use_dust_map and use_dbeta_map:
+        raise ValueError('Cannot use dbeta map wihout dust map.')
+
+    Ncomp = 1
+    if use_dust_map: Ncomp += 1
+    if use_dbeta_map: Ncomp += 1
+
     nilc_maps = np.zeros((nsplit, Ncomp, 12*nside**2), dtype=np.float32)
     
     # current environment, also environment in which to run subprocesses
@@ -89,11 +95,13 @@ def get_nilc_maps(pyilc_path, map_tmpdir, nsplit, nside, fiducial_beta, fiducial
         pyilc_input_params['N_deproj'] = 0
         pyilc_input_params['N_SED_params'] = 0
         pyilc_input_params['N_maps_xcorr'] = 0
-        pyilc_input_params['freq_map_files'] = [f'{map_tmpdir}/map_split{split}_freq{f}.fits' for f in range(pyilc_input_params['N_freqs'])] 
+        pyilc_input_params['freq_map_files'] = \
+            [f'{map_tmpdir}/map_split{split}_freq{f}.fits' for f in range(pyilc_input_params['N_freqs'])] 
         pyilc_input_params['save_as'] = 'fits'
 
         #Dust parameters
-        pars = {'beta_CIB': float(fiducial_beta), 'Tdust_CIB': float(fiducial_T_dust), 'nu0_CIB_ghz': float(freq_pivot_dust),
+        pars = {'beta_CIB': float(fiducial_beta), 'Tdust_CIB': float(fiducial_T_dust),
+                'nu0_CIB_ghz': float(freq_pivot_dust),
                 'kT_e_keV':5.0, 'nu0_radio_ghz':150.0, 'beta_radio': -0.5}
         dust_pars_yaml = f'{nilc_tmpdir}/dust_pars.yaml'
         with open(dust_pars_yaml, 'w') as outfile:
@@ -115,18 +123,21 @@ def get_nilc_maps(pyilc_path, map_tmpdir, nsplit, nside, fiducial_beta, fiducial
             raise ValueError("Cannot deproject dbeta without deprojecting dust")
         else:
             cmb_oname = 'needletILCmap_component_CMB'
-        dust_param_dict = {'ILC_preserved_comp': 'CIB'} 
-        dust_param_dict.update(pyilc_input_params)
-        all_param_dicts = [cmb_param_dict, dust_param_dict]
+
+        comps = ['CMB']
+        all_param_dicts = [cmb_param_dict]        
+        if use_dust_map:
+            dust_param_dict = {'ILC_preserved_comp': 'CIB'} 
+            dust_param_dict.update(pyilc_input_params)
+            all_param_dicts.append(dust_param_dict)
+            comps.append('dust')
         if use_dbeta_map:
             dbeta_param_dict = {'ILC_preserved_comp': 'CIB_dbeta'}
             dbeta_param_dict.update(pyilc_input_params)
             all_param_dicts.append(dbeta_param_dict)
+            comps.append('dbeta')
 
         #Dump CMB and dust yaml files
-        comps = ['CMB', 'dust']
-        if use_dbeta_map:
-            comps.append('dbeta')
         all_yaml_files = [f'{nilc_tmpdir}/split{split}_{comp}_preserved.yml' for comp in comps]
         for c, comp in enumerate(comps):
             with open(all_yaml_files[c], 'w') as outfile:
@@ -136,18 +147,19 @@ def get_nilc_maps(pyilc_path, map_tmpdir, nsplit, nside, fiducial_beta, fiducial
         stdout = subprocess.DEVNULL if not debug else None
         
         for c, comp in enumerate(comps):
-            subprocess.run([f"python {pyilc_path}/pyilc/main.py {all_yaml_files[c]}"], shell=True, env=env, stdout=stdout, stderr=stdout)
+            subprocess.run([f"python {pyilc_path}/pyilc/main.py {all_yaml_files[c]}"],
+                           shell=True, env=env, stdout=stdout, stderr=stdout)
         
         #load NILC maps, then remove nilc tmpdir
-        cmb_nilc = hp.read_map(f'{nilc_tmpdir}/{cmb_oname}.fits')        
-        #dust_nilc = 10**6*hp.read_map(f'{nilc_tmpdir}/needletILCmap_component_CIB.fits')
-        dust_nilc = hp.read_map(f'{nilc_tmpdir}/needletILCmap_component_CIB.fits')        
+        cmb_nilc = hp.read_map(f'{nilc_tmpdir}/{cmb_oname}.fits')
+        nilc_maps[split,0] = cmb_nilc
+        if use_dust_map:
+            dust_nilc = hp.read_map(f'{nilc_tmpdir}/needletILCmap_component_CIB.fits')
+            nilc_maps[split,1] = dust_nilc
         if use_dbeta_map:
-            #dbeta_nilc = 10**6*hp.read_map(f'{nilc_tmpdir}/needletILCmap_component_CIB_dbeta.fits')
             dbeta_nilc = hp.read_map(f'{nilc_tmpdir}/needletILCmap_component_CIB_dbeta.fits')            
-            nilc_maps[split] = np.array([cmb_nilc, dust_nilc, dbeta_nilc])
-        else:
-            nilc_maps[split] = np.array([cmb_nilc, dust_nilc])
+            nilc_maps[split,2] = dbeta_nilc
+            
         if remove_files:
             shutil.rmtree(nilc_tmpdir)
     

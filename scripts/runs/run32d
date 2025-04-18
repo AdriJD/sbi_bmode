@@ -1,25 +1,20 @@
 #!/bin/bash
-#SBATCH --job-name=run30
+#SBATCH --job-name=run32d
 #SBATCH --partition=preempt
-##SBATCH --partition=gen
 #SBATCH --qos=preempt
 #SBATCH --constraint=rome
 #SBATCH --nodes=6
-##SBATCH --nodes=1
 #SBATCH --ntasks-per-node=128
-##SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=1
-#SBATCH --time=00:59:00
-##SBATCH --time=00:50:00
+#SBATCH --time=04:00:00
 
 export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
-#export OMP_NUM_THREADS=1
 
 module load adri_gcc
 module load adri_base
 source /mnt/home/aduivenvoorden/.pyenv/versions/enki/bin/activate
 
-TAG=run30
+TAG=run32d
 ANADIR=/mnt/home/aduivenvoorden/local/cca_project/scripts
 ODIR=/mnt/home/aduivenvoorden/project/so/20240521_sbi_bmode/${TAG}
 SPECDIR=/mnt/home/aduivenvoorden/local/cca_project/data
@@ -33,8 +28,7 @@ export JAX_DEBUG_NANS=True
 export JAX_PLATFORMS=cpu 
 
 NROUNDS=1
-NTRAIN_PER_ROUND=5376
-#NTRAIN_PER_ROUND=128
+NTRAIN_PER_ROUND=10752
 FID_BETA=1.5
 FID_T=19.6
 

@@ -28,14 +28,18 @@ class CMBSimulator():
     fixed_params_dict:
     pyilcdir: str
         Path to pyilc respository. Setting to None means NILC is not used.
-    use_dbeta_map: Bool
+    use_dust_map: bool, optional
+        Only relevant if using nilc (pyilc dir is not None). Whether
+        to build map of dust and include it in auto- and cross-spectra in
+        the data vector    
+    use_dbeta_map: bool, optional
         Only relevant if using nilc (pyilc dir is not None). Whether
         to build map of first moment w.r.t. beta and include it in
         auto- and cross-spectra in the data vector
-    deproj_dust: Bool
+    deproj_dust: bool, optional
         Only relevant if using nilc (pyilc dir is not None). Whether to
         deproject dust in CMB NILC map.
-    deproj_dbeta: Bool
+    deproj_dbeta: bool, optional
         Only relevant if using nilc (pyilc dir is not None). Whether to
         deproject first moment of dust w.r.t. beta in CMB NILC map.
     fiducial_beta: float, optional
@@ -51,9 +55,9 @@ class CMBSimulator():
         compression.
     '''
 
-    def __init__(self, specdir, data_dict, fixed_params_dict, pyilcdir=None, use_dbeta_map=False,
-                deproj_dust=False, deproj_dbeta=False, fiducial_beta=None, fiducial_T_dust=None,
-                odir=None, norm_params=None, score_params=None):
+    def __init__(self, specdir, data_dict, fixed_params_dict, pyilcdir=None, use_dust_map=True,
+                 use_dbeta_map=False, deproj_dust=False, deproj_dbeta=False, fiducial_beta=None,
+                 fiducial_T_dust=None, odir=None, norm_params=None, score_params=None):
 
         self.lmax = data_dict['lmax']
         self.lmin = data_dict['lmin']
@@ -61,6 +65,7 @@ class CMBSimulator():
         self.nsplit = data_dict['nsplit']
         self.delta_ell = data_dict['delta_ell']
         self.pyilcdir = pyilcdir
+        self.use_dust_map = use_dust_map
         self.use_dbeta_map = use_dbeta_map
         self.deproj_dust = deproj_dust
         self.deproj_dbeta = deproj_dbeta
@@ -81,9 +86,13 @@ class CMBSimulator():
         self.freqs = [so_utils.sat_central_freqs[fstr] for fstr in self.freq_strings]
         self.nfreq = len(self.freqs)
         if pyilcdir:
-            self.ncomp = 2 if not self.use_dbeta_map else 3
+            if not use_dust_map and self.use_dbeta_map:
+                raise ValueError('Cannot use dbeta map wihout dust map.')                
+            self.ncomp = 1
+            if self.use_dust_map: self.ncomp += 1
+            if self.use_dbeta_map: self.ncomp += 1
             self.size_data = get_ntri(self.nsplit, self.ncomp) * (self.bins.size - 1)
-            if self.use_dbeta_map or self.deproj_dust or self.deproj_dbeta:
+            if self.use_dust_map or self.deproj_dust or self.deproj_dbeta:
                 assert self.fiducial_beta is not None
                 assert self.fiducial_T_dust is not None
         else:
@@ -251,12 +260,12 @@ class CMBSimulator():
             B_maps *= 1e-6
 
             map_tmpdir = nilc_utils.write_maps(B_maps, output_dir=self.odir)
-            nilc_maps = nilc_utils.get_nilc_maps(self.pyilcdir, map_tmpdir, self.nsplit, self.nside,
-                                                 self.fiducial_beta, self.fiducial_T_dust, self.freq_pivot_dust,
-                                                 so_utils.sat_central_freqs, so_utils.sat_beam_fwhms,
-                                                 use_dbeta_map=self.use_dbeta_map, deproj_dust=self.deproj_dust,
-                                                 deproj_dbeta=self.deproj_dbeta, output_dir=self.odir,
-                                                 remove_files=True, debug=False)
+            nilc_maps = nilc_utils.get_nilc_maps(
+                self.pyilcdir, map_tmpdir, self.nsplit, self.nside, self.fiducial_beta,
+                self.fiducial_T_dust, self.freq_pivot_dust, so_utils.sat_central_freqs,
+                so_utils.sat_beam_fwhms, use_dust_map=self.use_dust_map, use_dbeta_map=self.use_dbeta_map,
+                deproj_dust=self.deproj_dust, deproj_dbeta=self.deproj_dbeta, output_dir=self.odir,
+                remove_files=True, debug=False)
             spectra = estimate_spectra_nilc(nilc_maps, self.minfo, self.ainfo)
 
         else:
