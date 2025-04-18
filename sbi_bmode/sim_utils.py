@@ -39,13 +39,9 @@ class CMBSimulator():
         Only relevant if using nilc (pyilc dir is not None). Whether to
         deproject first moment of dust w.r.t. beta in CMB NILC map.
     fiducial_beta: float, optional
-        Only relevant if using nilc (pyilc dir is not None). If not None,
-        use this value for beta when building nilc maps. Otherwise, use a separate value
-        for each simulation.
+        Use this value for beta when building nilc maps.
     fiducial_T_dust: float, optional
-        Only relevant if using nilc (pyilc dir is not None). If not None,
-        use this value for T_dust when building nilc maps. Otherwise, use a separate value
-        for each simulation.
+        Use this value for T_dust when building nilc maps.
     odir: str
         Path to output directory
     norm_params: dict, optional
@@ -54,15 +50,15 @@ class CMBSimulator():
         Parameters of fiducial model where the score is evaluted for score
         compression.
     '''
-    
+
     def __init__(self, specdir, data_dict, fixed_params_dict, pyilcdir=None, use_dbeta_map=False,
                 deproj_dust=False, deproj_dbeta=False, fiducial_beta=None, fiducial_T_dust=None,
                 odir=None, norm_params=None, score_params=None):
-        
+
         self.lmax = data_dict['lmax']
         self.lmin = data_dict['lmin']
         self.nside = data_dict['nside']
-        self.nsplit = data_dict['nsplit']        
+        self.nsplit = data_dict['nsplit']
         self.delta_ell = data_dict['delta_ell']
         self.pyilcdir = pyilcdir
         self.use_dbeta_map = use_dbeta_map
@@ -87,6 +83,9 @@ class CMBSimulator():
         if pyilcdir:
             self.ncomp = 2 if not self.use_dbeta_map else 3
             self.size_data = get_ntri(self.nsplit, self.ncomp) * (self.bins.size - 1)
+            if self.use_dbeta_map or self.deproj_dust or self.deproj_dbeta:
+                assert self.fiducial_beta is not None
+                assert self.fiducial_T_dust is not None
         else:
             self.size_data = get_ntri(self.nsplit, self.nfreq) * (self.bins.size - 1)
 
@@ -94,7 +93,7 @@ class CMBSimulator():
         self.lknee_mode = data_dict['lknee_mode']
         self.noise_cov_ell = np.ones((self.nfreq, 2, 2, self.lmax + 1))
         self.fsky = data_dict['fsky']
-        
+
         for fidx, fstr in enumerate(self.freq_strings):
 
             # We scale the noise with the number of splits.
@@ -108,7 +107,7 @@ class CMBSimulator():
 
         self.norm_params = norm_params
         if self.norm_params and pyilcdir is None:
-            
+
             self.norm_model = np.asarray(self.get_signal_spectra(
                 norm_params['r_tensor'], norm_params['A_lens'], norm_params['A_d_BB'],
                 norm_params['alpha_d_BB'], norm_params['beta_dust']))
@@ -117,14 +116,14 @@ class CMBSimulator():
                 self.norm_model, noise_spectra, self.bins, self.lmin,
                 self.lmax, self.nsplit, self.nfreq)
             self.sqrt_norm_cov = mat_utils.matpow(norm_cov, 0.5, return_diag=True)
-            self.isqrt_norm_cov = mat_utils.matpow(norm_cov, -0.5, return_diag=True)  
-            
+            self.isqrt_norm_cov = mat_utils.matpow(norm_cov, -0.5, return_diag=True)
+
         self.score_params = score_params
         if self.score_params and pyilcdir is None:
-            
+
             if self.score_params and self.norm_params:
                 raise ValueError('Cannot have both norm_params and score_params')
-            
+
             self.score_model = np.asarray(self.get_signal_spectra(
                 score_params['r_tensor'], score_params['A_lens'], score_params['A_d_BB'],
                 score_params['alpha_d_BB'], score_params['beta_dust']))
@@ -134,11 +133,11 @@ class CMBSimulator():
                 self.lmax, self.nsplit, self.nfreq)
             tri_indices = get_tri_indices(self.nsplit, self.nfreq)
             icov = mat_utils.matpow(cov, -1, return_diag=True)
-            
+
             score_params_arr = jnp.asarray(
                 [score_params['r_tensor'], score_params['A_lens'], score_params['A_d_BB'],
 		 score_params['alpha_d_BB'], score_params['beta_dust']])
-            
+
             def get_loglike(params, data):
 
                 data = data.reshape(tri_indices.shape[0], -1)
@@ -146,10 +145,10 @@ class CMBSimulator():
                 loglike = likelihood_utils.loglike(model, data, icov, tri_indices)
 
                 return loglike
-                
+
             self.grad_logdens = grad(get_loglike, argnums=0)
             self.score_compress = lambda x: self.grad_logdens(score_params_arr, x)
-            
+
     def get_signal_spectra(self, r_tensor, A_lens, A_d_BB, alpha_d_BB, beta_dust):
         '''
         Generate binned signal frequency cross spectra.
@@ -161,7 +160,7 @@ class CMBSimulator():
         A_lens : float
             A_lens parameter.
         A_d_BB : float
-        
+
         Returns
         -------
         cov_bin : (nfreq, nfreq, nbin) array
@@ -188,18 +187,19 @@ class CMBSimulator():
         Returns
         -------
         cov_bin : (nfreq, nfreq, nbin) array
-            Noise frequency cross spectra.        
+            Noise frequency cross spectra.
         '''
 
-        out = np.zeros((self.nfreq, self.nfreq, self.lmax+1))                
+        out = np.zeros((self.nfreq, self.nfreq, self.lmax+1))
         out[:] = np.eye(self.nfreq)[:,:,np.newaxis] * self.noise_cov_ell[:,1,1]
 
         cov_bin = spectra_utils.bin_spectrum(
             out, np.arange(self.lmax+1), self.bins, self.lmin, self.lmax, use_jax=use_jax)
 
         return cov_bin
-        
-    def draw_data(self, r_tensor, A_lens, A_d_BB, alpha_d_BB, beta_dust, seed):
+
+    def draw_data(self, r_tensor, A_lens, A_d_BB, alpha_d_BB, beta_dust,
+                  seed, amp_beta_dust=None, gamma_beta_dust=None):
         '''
         Draw data realization.
 
@@ -208,7 +208,7 @@ class CMBSimulator():
         r_tensor : float
             Tensor-to-scalar ratio.
         A_lens : float
-            Amplitude of lensing contribution to BB.        
+            Amplitude of lensing contribution to BB.
         A_d_BB : float
             Dust amplitude.
         alpha_d_BB : float
@@ -217,13 +217,17 @@ class CMBSimulator():
             Dust frequency power law index.
         seed : int, np.random._generator.Generator object
             Seed or random number generator object.
+        amp_beta_dust : float, optional
+            Amplitude of dust beta power spectrum at pivot multipole.
+        gamma_beta_dust : float, optional
+            Tilt of dust beta power spectrum.
 
         Returns
         -------
         data : (ndata) array
             Data realization.
         '''
-        
+
         if seed == -1:
             seed = None
         seed = np.random.default_rng(seed=seed)
@@ -231,28 +235,30 @@ class CMBSimulator():
         omap = gen_data(
             A_d_BB, alpha_d_BB, beta_dust, self.freq_pivot_dust, self.temp_dust,
             r_tensor, A_lens, self.freqs, seed, self.nsplit, self.noise_cov_ell,
-            self.cov_scalar_ell, self.cov_tensor_ell, self.minfo, self.ainfo)
+            self.cov_scalar_ell, self.cov_tensor_ell, self.minfo, self.ainfo,
+            amp_beta_dust=amp_beta_dust, gamma_beta_dust=gamma_beta_dust)
 
         if self.pyilcdir:
             # build NILC B-mode maps with shape (nsplit, ncomp=2, npix)
             nfreq = len(self.freqs)
             B_maps = np.zeros((self.nsplit, nfreq, self.minfo.npix))
+            tmp_alm = np.zeros((2, self.ainfo.nelem), dtype=np.complex128) # E, B temp.
             for split in range(self.nsplit):
                 for f, freq_str in enumerate(self.freq_strings):
-                    Q, U = omap[split, f]
-                    # alm_T is just a placeholder                    
-                    alm_T, alm_E, alm_B = hp.map2alm([np.zeros_like(Q), Q, U], pol=True) 
-                    B_maps[split, f] = 10**(-6)*hp.alm2map(alm_B, self.nside)
+                    sht.map2alm(omap[split,f], tmp_alm, self.minfo, self.ainfo, 2)
+                    sht.alm2map(tmp_alm[1], B_maps[split,f], self.ainfo, self.minfo, 0)
+
+            B_maps *= 1e-6
+
             map_tmpdir = nilc_utils.write_maps(B_maps, output_dir=self.odir)
-            nilc_maps = nilc_utils.get_nilc_maps(self.pyilcdir, map_tmpdir, self.nsplit, self.nside, 
-                                                 beta_dust, self.temp_dust, self.freq_pivot_dust, 
+            nilc_maps = nilc_utils.get_nilc_maps(self.pyilcdir, map_tmpdir, self.nsplit, self.nside,
+                                                 self.fiducial_beta, self.fiducial_T_dust, self.freq_pivot_dust,
                                                  so_utils.sat_central_freqs, so_utils.sat_beam_fwhms,
                                                  use_dbeta_map=self.use_dbeta_map, deproj_dust=self.deproj_dust,
-                                                 deproj_dbeta=self.deproj_dbeta, fiducial_beta=self.fiducial_beta,
-                                                 fiducial_T_dust=self.fiducial_T_dust, output_dir=self.odir,
+                                                 deproj_dbeta=self.deproj_dbeta, output_dir=self.odir,
                                                  remove_files=True, debug=False)
             spectra = estimate_spectra_nilc(nilc_maps, self.minfo, self.ainfo)
-        
+
         else:
             spectra = estimate_spectra(omap, self.minfo, self.ainfo)
         
@@ -264,7 +270,7 @@ class CMBSimulator():
 
         if self.norm_params:
             data = self.get_norm_data(data)
-            
+
         return data
 
     def get_norm_data(self, data):
@@ -275,20 +281,20 @@ class CMBSimulator():
         ----------
         data : (ndata) array
             Input data.
-        
+
         Returns
         -------
         data_norm : (ndata) array
             Normalized data.
         '''
-        
+
         ntri = get_ntri(self.nsplit, self.nfreq)
         tri_indices = get_tri_indices(self.nsplit, self.nfreq)
         data = likelihood_utils.get_diff(
             data.reshape(ntri, -1), self.norm_model, tri_indices)
         data = np.einsum('ijk, jk -> ik', self.isqrt_norm_cov, data)
         data_norm = data.reshape(-1)
-        
+
         return data_norm
 
     def get_unnorm_data(self, data_norm):
@@ -299,7 +305,7 @@ class CMBSimulator():
         ----------
         data_norm : (ndata) array
             Nomalized data.
-        
+
         Returns
         -------
         data : (ndata) array
@@ -315,10 +321,80 @@ class CMBSimulator():
         data = data.reshape(-1)
 
         return data
-    
+
+def get_delta_beta_cl(amp, gamma, lmax, ell_0=1, ell_cutoff=1):
+    '''
+    Returns power spectrum for spectral index fluctuations.
+
+    Parameters
+    ----------
+    amp : float
+        Amplitude at pivot multipole.
+    gamma : float
+        Tilt of power spectrum.
+    lmax : int
+        Maximum multipole
+    ell_0 : int, optional
+        Pivot multipole.
+    ell_cutoff : int, optional
+        Multipole below which the power spectrum will be zero.
+
+    Returns
+    -------
+    c_ell_beta : (nell) array
+        Beta power spectrum
+    '''
+
+    ells = np.arange(lmax + 1)
+    ind_above = np.where(ells > ell_cutoff)[0]
+    cls = np.zeros(len(ells))
+    cls[ind_above] = amp * (ells[ind_above] / ell_0) ** gamma
+
+    return cls
+
+def get_beta_map(minfo, ainfo, beta0, amp, gamma, seed, ell_0=1, ell_cutoff=1):
+    '''
+    Returns realization of the spectral index map.
+
+    Parameters
+    ----------
+    minfo : optweight.map_utils.MapInfo object
+        Geometry of output map.
+    ainfo : pixell.curvedsky.alm_info object
+        Layout of spherical harmonic coefficients.
+    beta0 : float
+        Monopole of the beta map.
+    amp : float
+        Amplitude at pivot multipole.
+    gamma : float
+        Tilt of power spectrum.
+    seed : numpy.random._generator.Generator object or int
+        Random number generator or seed for new random number generator.
+    ell_0 : int, optional
+        Pivot multipole.
+    ell_cutoff : int, optional
+        Multipole below which the power spectrum will be zero.
+
+    Returns
+    -------
+    beta_map : (npix) array
+        Beta map, including monopole of beta.
+    '''
+
+    seed = np.random.default_rng(seed=seed)
+
+    cls = get_delta_beta_cl(amp, gamma, ainfo.lmax, ell_0, ell_cutoff)
+    alm_beta = alm_utils.rand_alm(cls, ainfo, seed, dtype=np.complex128)
+
+    map_beta = np.zeros((minfo.npix))
+    sht.alm2map(alm_beta, map_beta, ainfo, minfo, 0)
+
+    return map_beta + beta0
+
 def gen_data(A_d_BB, alpha_d_BB, beta_dust, freq_pivot_dust, temp_dust,
              r_tensor, A_lens, freqs, seed, nsplit, cov_noise_ell,
-             cov_scalar_ell, cov_tensor_ell, minfo, ainfo):
+             cov_scalar_ell, cov_tensor_ell, minfo, ainfo,
+             amp_beta_dust=None, gamma_beta_dust=None):
     '''
     Generate simulated maps.
 
@@ -354,6 +430,10 @@ def gen_data(A_d_BB, alpha_d_BB, beta_dust, freq_pivot_dust, temp_dust,
         Geometry of output map.
     ainfo : pixell.curvedsky.alm_info object
         Layout of spherical harmonic coefficients.
+    amp_beta_dust : float, optional
+        Amplitude of dust beta power spectrum at pivot multipole.
+    gamma_beta_dust : float, optional
+        Tilt of dust beta power spectrum.
 
     Returns
     -------
@@ -366,10 +446,11 @@ def gen_data(A_d_BB, alpha_d_BB, beta_dust, freq_pivot_dust, temp_dust,
 
     # Spawn rng for dust and noise.
     seed = np.random.default_rng(seed)
-    rngs = seed.spawn(2 + nsplit)
+    rngs = seed.spawn(3 + nsplit)
     rng_cmb = rngs[0]
     rng_dust = rngs[1]
-    rngs_noise = rngs[2:]
+    rng_beta = rngs[2]
+    rngs_noise = rngs[3:]
 
     # Generate the CMB spectra.
     cov_ell = spectra_utils.get_combined_cmb_spectrum(
@@ -384,20 +465,141 @@ def gen_data(A_d_BB, alpha_d_BB, beta_dust, freq_pivot_dust, temp_dust,
     cmb_alm = alm_utils.rand_alm(cov_ell, ainfo, rng_cmb, dtype=np.complex128)
     dust_alm = alm_utils.rand_alm(cov_dust_ell, ainfo, rng_dust, dtype=np.complex128)
 
+    if gamma_beta_dust is not None:
+        assert amp_beta_dust is not None
+
+        # Create real-space dust map.
+        dust_map = np.zeros((2, minfo.npix))
+        sht.alm2map(dust_alm, dust_map, ainfo, minfo, 2)
+
+        # Generate the dust beta map.
+        beta_dust = get_beta_map(minfo, ainfo, beta_dust, amp_beta_dust, gamma_beta_dust, rng_beta)
+
+        gen_data_per_freq = lambda freq, cov_noise_ell: _gen_data_per_freq_gamma(
+            freq, cov_noise_ell, beta_dust, temp_dust, freq_pivot_dust, A_d_BB,
+            cmb_alm, dust_map, nsplit, rngs_noise, ainfo, minfo)
+
+    else:
+        gen_data_per_freq = lambda freq, cov_noise_ell: _gen_data_per_freq_simple(
+            freq, cov_noise_ell, beta_dust, temp_dust, freq_pivot_dust, A_d_BB,
+            cmb_alm, dust_alm, nsplit, rngs_noise, ainfo, minfo)
+
     for fidx, freq in enumerate(freqs):
-        dust_factor = spectra_utils.get_sed_dust(
-            freq, beta_dust, temp_dust, freq_pivot_dust)
-        g_factor = spectra_utils.get_g_fact(freq)
 
-        signal_alm = cmb_alm.copy()
-        signal_alm += dust_alm * np.sqrt(dust_factor * np.abs(A_d_BB)) * g_factor * np.sign(A_d_BB)
+        out[:,fidx,:,:] = gen_data_per_freq(freq, cov_noise_ell[fidx])
 
-        for sidx in range(nsplit):
+    return out
 
-            data_alm = signal_alm + alm_utils.rand_alm(
-                cov_noise_ell[fidx], ainfo, rngs_noise[sidx], dtype=np.complex128)
-            data_alm = np.asarray(data_alm, dtype=np.complex128)
-            sht.alm2map(data_alm, out[sidx,fidx], ainfo, minfo, 2)
+def _gen_data_per_freq_simple(freq, cov_noise_ell, beta_dust, temp_dust, freq_pivot_dust, A_d_BB,
+                              cmb_alm, dust_alm, nsplit, rngs_noise, ainfo, minfo):
+    '''
+    Generate data for a given frequency, using a data model with constant beta.
+
+    Parameters
+    ----------
+    freq : float
+        Effective freq of passband in Hz.
+    cov_noise_ell : (npol, npol, nell) array
+        Noise covariance matrix.
+    beta_dust : float
+        Dust frequency power law index.
+    temp_dust : float
+        Dust temperature for the blackbody part of the model.
+    freq_pivot_dust : float
+        Pivot frequency for the frequency power law.
+    A_d_BB : float
+        Dust amplitude.
+    cmb_alm : (2, nelem) complex array
+        CMB E- and B-mode alms.
+    dust_alm : (2, nelem) complex array
+        Dust amplitude E- and B-mode alms.
+    nsplit : int
+        Number of splits of the data that have independent noise.
+    rngs_noise : array-like of numpy.random._generator.Generator object
+        Random number generators for per-split noise.
+    ainfo : pixell.curvedsky.alm_info object
+        Layout of spherical harmonic coefficients.
+    minfo : optweight.map_utils.MapInfo object
+        Geometry of output map.
+
+    Returns
+    -------
+    out : (nsplit, 2, npix) array
+        Stokes Q and U maps for each split.
+    '''
+
+    out = np.zeros((nsplit, 2, minfo.npix))
+
+    dust_factor = spectra_utils.get_sed_dust(
+        freq, beta_dust, temp_dust, freq_pivot_dust)
+    g_factor = spectra_utils.get_g_fact(freq)
+
+    signal_alm = cmb_alm.copy()
+    signal_alm += dust_alm * np.sqrt(dust_factor * np.abs(A_d_BB)) * g_factor * np.sign(A_d_BB)
+
+    for sidx in range(nsplit):
+
+        data_alm = signal_alm + alm_utils.rand_alm(
+            cov_noise_ell, ainfo, rngs_noise[sidx], dtype=np.complex128)
+        data_alm = np.asarray(data_alm, dtype=np.complex128)
+        sht.alm2map(data_alm, out[sidx], ainfo, minfo, 2)
+
+    return out
+
+def _gen_data_per_freq_gamma(freq, cov_noise_ell, beta_dust, temp_dust, freq_pivot_dust, A_d_BB,
+                             cmb_alm, dust_map, nsplit, rngs_noise, ainfo, minfo):
+    '''
+    Generate data for a given frequency, using a data model with varying beta.
+
+    Parameters
+    ----------
+    freq : float
+        Effective freq of passband in Hz.
+    cov_noise_ell : (npol, npol, nell) array
+        Noise covariance matrix.
+    beta_dust : (npix) array
+        Beta map, including monopole of beta.
+    temp_dust : float
+        Dust temperature for the blackbody part of the model.
+    freq_pivot_dust : float
+        Pivot frequency for the frequency power law.
+    A_d_BB : float
+        Dust amplitude.
+    cmb_alm : (2, nelem) complex array
+        CMB E- and B-mode alms.
+    dust_map : (2, nelem) complex array
+        Dust amplitude Stokes Q and U maps.
+    nsplit : int
+        Number of splits of the data that have independent noise.
+    rngs_noise : array-like of numpy.random._generator.Generator object
+        Random number generators for per-split noise.
+    ainfo : pixell.curvedsky.alm_info object
+        Layout of spherical harmonic coefficients.
+    minfo : optweight.map_utils.MapInfo object
+        Geometry of output map.
+
+    Returns
+    -------
+    out : (nsplit, 2, npix) array
+        Stokes Q and U maps for each split.
+    '''
+
+    out = np.zeros((nsplit, 2, minfo.npix))
+
+    g_factor = spectra_utils.get_g_fact(freq)
+
+    # Apply spatially varying SED scaling in real space.
+    sed_map = spectra_utils.get_sed_dust(freq, beta_dust, temp_dust, freq_pivot_dust)
+    scaled_dust_map = dust_map * np.sqrt(np.abs(A_d_BB) * sed_map) * g_factor * np.sign(A_d_BB)
+    signal_alm = cmb_alm.copy()
+
+    for sidx in range(nsplit):
+
+        data_alm = signal_alm + alm_utils.rand_alm(
+            cov_noise_ell, ainfo, rngs_noise[sidx], dtype=np.complex128)
+        data_alm = np.asarray(data_alm, dtype=np.complex128)
+        sht.alm2map(data_alm, out[sidx], ainfo, minfo, 2)
+        out[sidx] += scaled_dust_map
 
     return out
 
@@ -451,7 +653,8 @@ def get_ntri(nsplit, nfreq):
 def get_tri_indices(nsplit, nfreq):
     '''
     Get indices into upper-triangular part of the
-    (nsplits * nfreq) x (nsplits * nfreq) cross-spectrum matrix.
+    (nsplits * nfreq) x (nsplits * nfreq) cross-spectrum matrix,
+    while excluding combinations that share split indices.
 
     Parameters
     ----------
@@ -507,14 +710,12 @@ def estimate_spectra(imap, minfo, ainfo):
     Returns
     -------
     out : (ntri, 1, lmax + 1)
-        Output BB spectra. Only the elements of the upper-triangular part
-        of the (nsplits * nfreq) x (nsplits * nfreq) matrix are included.
+        Output BB spectra. See `get_tri_indices`.
     '''
 
     nsplit = imap.shape[0]
     nfreq = imap.shape[1]
 
-    # Number of elements in the upper triangle of the ntot x ntot matrix.
     ntri = get_ntri(nsplit, nfreq)
     out = np.zeros((ntri, 1, ainfo.lmax + 1))
 
@@ -531,12 +732,12 @@ def estimate_spectra(imap, minfo, ainfo):
 def estimate_spectra_nilc(imap, minfo, ainfo):
     '''
     Compute all the auto and cross-spectra between splits and
-    and frequency bands.
+    and components, while excluding combinations with the same split indices.
 
     Parameters
     ----------
-    imap : (nsplit, ncomp=2, npix)
-        Input maps.
+    imap : (nsplit, ncomp, npix)
+        Input B-mode maps.
     minfo : optweight.map_utils.MapInfo object
         Geometry of output map.
     ainfo : pixell.curvedsky.alm_info object
@@ -545,21 +746,21 @@ def estimate_spectra_nilc(imap, minfo, ainfo):
     Returns
     -------
     out : (ntri, 1, lmax + 1)
-        Output BB spectra. Only the elements of the upper-triangular part
-        (+ the diagonal) of the (nsplits * nfreq) x (nsplits * nfreq) matrix
-        are included.
+        Output BB spectra. See `get_tri_indices`.
     '''
 
     nsplit = imap.shape[0]
     ncomp = imap.shape[1]
 
-    # Number of elements in the upper triangle of the ntot x ntot matrix.
     ntri = get_ntri(nsplit, ncomp)
     out = np.zeros((ntri, 1, ainfo.lmax + 1))
 
+    alm = np.zeros((nsplit, ncomp, ainfo.nelem), dtype=np.complex128)
+    sht.map2alm(imap.astype(np.float64, copy=False), alm, minfo, ainfo, 0)
+
     tri_indices = get_tri_indices(nsplit, ncomp)
-    for idx, (sidx1, fidx1, sidx2, fidx2) in enumerate(tri_indices):
-        out[idx, 0] = hp.anafast(imap[sidx1, fidx1], imap[sidx2, fidx2], lmax=ainfo.lmax)
+    for idx, (sidx1, cidx1, sidx2, cidx2) in enumerate(tri_indices):
+        out[idx,0] = ainfo.alm2cl(alm[sidx1,cidx1], alm2=alm[sidx2,cidx2])
 
     return out
 
