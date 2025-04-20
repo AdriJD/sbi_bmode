@@ -57,5 +57,6 @@ run32d	like run30, but 2x sims, cmb + dust + dbeta + deprojection dust + deproje
 run33a	like run30, but 2x sims, cmb
 run33b	like run30, but 2x sims, cmb + deprojection dust
 run33c	like run30, but 2x sims, cmb + deprojection dust + deprojection dbeta
+mcmc33  
 
 checkcov00    check analytic cov with Monte-Carlo

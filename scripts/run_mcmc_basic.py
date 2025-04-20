@@ -51,6 +51,10 @@ def get_prior(params_dict):
             prior.append(likelihood_utils.HalfNormal(
                 *prior_dict['prior_params']))
             bounds.append((0., None))
+        elif prior_dict['prior_type'].lower() == 'truncatednormal':
+            prior.append(likelihood_utils.TruncatedNormal(
+                *prior_dict['prior_params']))
+            bounds.append((*prior_dict['prior_params'][2:]))
             
         else:
             raise ValueError(f"{prior_dict['prior_type']=} not understood")

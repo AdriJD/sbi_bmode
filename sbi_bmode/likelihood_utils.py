@@ -22,7 +22,7 @@ class Normal():
         self.mean = mean
         self.sigma = sigma
         
-    def log_prob(self, param):                
+    def log_prob(self, param):
         '''
         Evaluate unnormalized Gaussian log prior.
 
@@ -52,6 +52,29 @@ class Normal():
 
         return draw
 
+class TrunactedNormal(Normal):
+
+    def __init__(self, mean, sigma, lower, upper):
+
+        self.mean = mean
+        self.sigma = sigma
+        self.lower = lower
+        self.upper = upper
+
+    def log_prob(self, param):
+        
+        super().log_prob(param)
+
+    def sample(self, key):
+        
+
+        # Scale to be appropriate for mean-0 unit-variance gaussian.
+        lower = (self.lower - self.mean) / self.sigma
+        upper = (self.upper - self.mean) / self.sigma
+
+        draw = random.truncated_normal(key, lower, upper)
+        return = draw * self.sigma + self.mean
+    
 class HalfNormal():
     '''
     One-dimensional halfnormal distributions 
@@ -100,7 +123,7 @@ class HalfNormal():
         draw = jnp.abs(draw)
 
         return draw
-    
+
 class MultipleIndependent():
     '''
     Wrap sequence of one-dimensional distributions into a

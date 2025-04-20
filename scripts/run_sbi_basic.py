@@ -1,5 +1,4 @@
 import os
-import errno
 import yaml
 import pickle
 import argparse
@@ -10,7 +9,6 @@ from mpi4py import MPI
 from pixell import curvedsky
 from optweight import map_utils
 import torch
-from torch.distributions import Normal, HalfNormal
 from sbi.inference import SNPE, simulate_for_sbi, FMPE
 from sbi.utils.sbiutils import seed_all_backends
 from sbi.utils.user_input_checks import (
@@ -22,34 +20,12 @@ from sbi.utils.user_input_checks import (
 from sbi.neural_nets.embedding_nets import FCEmbedding
 from sbi.neural_nets import posterior_nn, flowmatching_nn
 
-import sys
-sys.path.append('..')
 from sbi_bmode import (
-    sim_utils, script_utils, compress_utils, custom_distributions)
+    sim_utils, script_utils, compress_utils, custom_distributions,
+    script_utils)
 
 opj = os.path.join
 comm = MPI.COMM_WORLD
-
-def symlink_force(target, link_name):
-    '''
-    Create a symlink, overwrite existing link if present.
-
-    Parameters
-    ----------
-    target : str
-        Path to target.
-    link_name : str
-        Path to symlink.    
-    '''
-    
-    try:
-        os.symlink(target, link_name)
-    except OSError as e:
-        if e.errno == errno.EEXIST:
-            os.remove(link_name)
-            os.symlink(target, link_name)
-        else:
-            raise e
 
 def normalize_simple(data, data_mean, data_std):
     '''
@@ -100,42 +76,6 @@ def unnormalize_simple(data_norm, data_mean, data_std):
         data_norm = data_norm[np.newaxis,:]
 
     return (data_norm * data_std + data_mean).reshape(shape)
-
-def get_prior(params_dict):
-    '''
-    Parse parameter dictionary and return pytorch prior distribution.
-
-    Parameters
-    ----------
-    params_dict : dict
-        Dictionary with parameters that we sample.
-
-    Returns
-    -------
-    prior : list of torch.distributions objects
-        Prior distributions for each parameter.
-    param_names : list of str
-        List of parameter names in same order as prior.
-    '''
-
-    prior = []
-    param_names = []
-    for param, prior_dict in params_dict.items():
-
-        if prior_dict['prior_type'].lower() == 'normal':
-            prior.append(Normal(*prior_dict['prior_params']))
-        elif prior_dict['prior_type'].lower() == 'halfnormal':
-            prior.append(HalfNormal(*prior_dict['prior_params']))
-        elif prior_dict['prior_type'].lower() == 'truncatednormal':
-            prior.append(custom_distributions.TruncatedNormal(*prior_dict['prior_params']))
-        else:
-            raise ValueError(f"{prior_dict['prior_type']=} not understood")
-        param_names.append(param)
-
-    # sbi needs the distributions to not be scalar.
-    #return [p.expand(torch.Size([1])) for p in prior], param_names
-    prior_list = [p.expand(torch.Size([1])) for p in prior]
-    return MultipleIndependent(prior_list), param_names
 
 def simulate_for_sbi_mpi(simulator, proposal, param_names, num_sims, ndata, seed, comm,
                          score_compress, mat_compress=None):
@@ -229,27 +169,6 @@ def simulate_for_sbi_mpi(simulator, proposal, param_names, num_sims, ndata, seed
 
     return thetas_full, sims_full
 
-def get_true_params(params_dict):
-    '''
-    Extract the true values of the parameters.
-
-    Parameters
-    ----------
-    params_dict : dict
-        Dictionary with parameters that we sample.
-
-    Returns
-    -------
-    true_params : dict
-        Dictionary with params names and values.
-    '''
-
-    true_params = {}
-    for param_name, pd in params_dict.items():
-        true_params[param_name] = pd['true_value']
-
-    return true_params
-
 def main(odir, config, specdir, r_true, seed, n_train, n_samples, n_rounds, pyilcdir, use_dust_map,
          use_dbeta_map, deproj_dust, deproj_dbeta, fiducial_beta, fiducial_T_dust,
          no_norm=False, score_compress=False, embed=False, embed_num_layers=2,
@@ -336,7 +255,8 @@ def main(odir, config, specdir, r_true, seed, n_train, n_samples, n_rounds, pyil
     seed_all_backends(int(rng_sbi.integers(2 ** 32 - 1)))
 
     data_dict, fixed_params_dict, params_dict = script_utils.parse_config(config)
-    prior, param_names = get_prior(params_dict)
+    prior, param_names = script_utils.get_prior(params_dict)
+    prior = MultipleIndependent(prior_list)
     prior, num_parameters, prior_returns_numpy = process_prior(prior)
 
     print(f'{prior.mean=}')
@@ -354,7 +274,7 @@ def main(odir, config, specdir, r_true, seed, n_train, n_samples, n_rounds, pyil
 
     if r_true is not None:
         params_dict['r_tensor']['true_value'] = r_true
-    true_params = get_true_params(params_dict)
+    true_params = script_utils.get_true_params(params_dict)
 
     if score_compress:
         # For now, compute the score around the true parameter values.
@@ -489,7 +409,7 @@ def main(odir, config, specdir, r_true, seed, n_train, n_samples, n_rounds, pyil
     if comm.rank == 0:
         with open(opj(odir, 'posterior.pkl'), "wb") as handle:
             pickle.dump(posterior, handle)
-        symlink_force(opj(odir, f'samples_round_{ridx:03d}.npy'), opj(odir, f'samples.npy'))
+        script_utils.symlink_force(opj(odir, f'samples_round_{ridx:03d}.npy'), opj(odir, f'samples.npy'))
         np.save(opj(odir, 'data_uncompressed.npy'), x_obs_full)
         if norm_params:
             np.save(opj(odir, 'data_norm.npy'), x_obs)
