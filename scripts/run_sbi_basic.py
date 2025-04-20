@@ -258,6 +258,7 @@ def main(odir, config, specdir, r_true, seed, n_train, n_samples, n_rounds, pyil
     seed_all_backends(int(rng_sbi.integers(2 ** 32 - 1)))
 
     data_dict, fixed_params_dict, params_dict = script_utils.parse_config(config)
+    config['param_order'] = param_names # To save the order that we actually used.
     prior, param_names = script_utils.get_prior(params_dict)
     prior = MultipleIndependent(prior_list)
     prior, num_parameters, prior_returns_numpy = process_prior(prior)
@@ -424,7 +425,7 @@ def main(odir, config, specdir, r_true, seed, n_train, n_samples, n_rounds, pyil
         else:
             np.save(opj(odir, 'data.npy'), x_obs_full)
         with open(opj(odir, 'config.yaml'), "w") as handle:
-            yaml.safe_dump(config, handle)
+            yaml.safe_dump(config, handle, sort_keys=False)
         np.save(opj(odir, 'training_loss.npy'), np.asarray(inference.summary['training_loss']))
         np.save(opj(odir, 'validation_loss.npy'), np.asarray(inference.summary['validation_loss']))
             
