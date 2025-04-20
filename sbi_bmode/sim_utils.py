@@ -53,6 +53,8 @@ class CMBSimulator():
     score_params: dict, optional
         Parameters of fiducial model where the score is evaluted for score
         compression.
+    coadd_equiv_crosses : bool, optional
+        Whtether to use the mean of e.g. comp1 x comp2 and comp2 x comp1 spectra.
     '''
 
     def __init__(self, specdir, data_dict, fixed_params_dict, pyilcdir=None, use_dust_map=True,
@@ -73,7 +75,8 @@ class CMBSimulator():
         self.fiducial_T_dust = fiducial_T_dust
         self.odir = odir
         self.bins = np.arange(self.lmin, self.lmax, self.delta_ell)
-
+        self.coadd_equiv_crosses = coadd_equiv_crosses
+        
         self.cov_scalar_ell = spectra_utils.get_cmb_spectra(
             opj(specdir, 'camb_lens_nobb.dat'), self.lmax)
         self.cov_tensor_ell = spectra_utils.get_cmb_spectra(
@@ -270,11 +273,12 @@ class CMBSimulator():
 
         else:
             spectra = estimate_spectra(omap, self.minfo, self.ainfo)
-        
-        # coadd spectra
-        ncomps = self.nfreq if self.pyilcdir is None else self.ncomp
-        spectra = coadd(spectra, self.nsplit, ncomps, self.lmax)
-        
+
+        if self.coadd_equiv_crosses:
+            # coadd spectra        
+            ncomps = self.nfreq if self.pyilcdir is None else self.ncomp
+            spectra = coadd(spectra, self.nsplit, ncomps, self.lmax)
+            
         data = get_final_data_vector(spectra, self.bins, self.lmin, self.lmax)
 
         if self.norm_params:
@@ -773,41 +777,46 @@ def estimate_spectra_nilc(imap, minfo, ainfo):
 
     return out
 
-
 def coadd(spec, nsplits, ncomps, ellmax): 
     ''' 
     Coadd cross-spectra from different splits
 
     Parameters 
     ---------- 
-    spec: (ntri, 1, lmax+1) input spectra 
-    nsplits: int, number of splits 
-    ncomps: int, number of frequencies or number of components 
-    ellmax: int, maximum ell
+    spec: (ntri, 1, lmax + 1) array
+        Input spectra.
+    nsplits: int
+        Number of splits.
+    ncomps: int
+        Number of frequencies or number of components.
+    ellmax: int
+        Maximum ell.
     
     Returns 
     ------- 
-    final_spectra: (len(sels_to_coadd), 1, ellmax + 1) array of coadded spectra 
-    ''' 
+    final_spectra: (len(sels_to_coadd), 1, ellmax + 1) array
+        Coadded spectra .
+    '''
+    
     sidx1, cidx1, sidx2, cidx2 = (get_tri_indices(nsplits, ncomps)).T 
     ntri = get_ntri(nsplits, ncomps)
 
-    # extract the unique cidx1, cidx2 combinations and puts them in unique_combs 
+    # Extract the unique cidx1, cidx2 combinations and puts them in unique_combs.
     pairs = [tuple(sorted((cidx1[i], cidx2[i]))) for i in range(ntri)] 
     unique_combs = sorted(set(pairs)) 
-    
+
+    # List of length len(unique_combs) where each elements is another list of indices.
     sels_to_coadd = [] 
     for comb in unique_combs: 
         sel = [i for i in range(ntri) if tuple(sorted((cidx1[i], cidx2[i]))) == comb] 
         sels_to_coadd.append(sel)
-    # Now sels_to_coadd is a list of length len(unique_combs) where each elements is another list of indices 
     
-    # Do the actual coadding 
+    # Do the actual coadding.
     final_spectra = np.zeros((len(sels_to_coadd), 1, ellmax + 1)) 
     for idx, selections in enumerate(sels_to_coadd): 
-        final_spectra[idx,0,:] = spec[selections,0,:].mean(axis=0) 
+        final_spectra[idx,0,:] = spec[selections,0,:].mean(axis=0)
+        
     return final_spectra
-
 
 def get_final_data_vector(spec, bins, lmin, lmax):
     '''

@@ -172,7 +172,8 @@ def simulate_for_sbi_mpi(simulator, proposal, param_names, num_sims, ndata, seed
 def main(odir, config, specdir, r_true, seed, n_train, n_samples, n_rounds, pyilcdir, use_dust_map,
          use_dbeta_map, deproj_dust, deproj_dbeta, fiducial_beta, fiducial_T_dust,
          no_norm=False, score_compress=False, embed=False, embed_num_layers=2,
-         embed_num_hiddens=25, fmpe=False, e_moped=False, n_moped=None, density_estimator_type='maf'):
+         embed_num_hiddens=25, fmpe=False, e_moped=False, n_moped=None, density_estimator_type='maf',
+         coadd_equiv_crosses=True):
     '''
     Run SBI.
 
@@ -236,6 +237,8 @@ def main(odir, config, specdir, r_true, seed, n_train, n_samples, n_rounds, pyil
         Number of simulations used for e-MOPED compression matrix.
     density_estimator_type : str, optional
         String denoting density estimator for NPE.
+    coadd_equiv_crosses : bool, optional
+        Whtether to use the mean of e.g. comp1 x comp2 and comp2 x comp1 spectra.    
     '''
 
     if score_compress and e_moped:
@@ -286,7 +289,8 @@ def main(odir, config, specdir, r_true, seed, n_train, n_samples, n_rounds, pyil
         specdir, data_dict, fixed_params_dict, pyilcdir=pyilcdir, use_dust_map=use_dust_map,
         use_dbeta_map=use_dbeta_map, deproj_dust=deproj_dust, deproj_dbeta=deproj_dbeta,
         fiducial_beta=fiducial_beta, fiducial_T_dust=fiducial_T_dust, odir=odir,
-        norm_params=norm_params, score_params=score_params)
+        norm_params=norm_params, score_params=score_params,
+        coadd_equiv_crosses=coadd_equiv_crosses)
 
     proposal = prior
 
@@ -472,7 +476,9 @@ if __name__ == '__main__':
                         default=1000)
     parser.add_argument('--density-estimator-type', type=str, default='maf',
                         help="pick from 'nsf', 'maf', 'mdn', 'made', 'zuko_maf' or 'zuko_nsf'")
-                        
+    parser.add_argument('--no-coadd-equiv-crosses', action='store_true',
+                        help='Do not coadd comp1 x comp2 and comp2 x comp1 cross spectra in data vector')
+    
     args = parser.parse_args()
 
     odir = args.odir
@@ -494,4 +500,5 @@ if __name__ == '__main__':
          no_norm=args.no_norm, score_compress=args.score_compress, embed=args.embed,
          embed_num_layers=args.embed_num_layers, embed_num_hiddens=args.embed_num_hiddens,
          fmpe=args.fmpe, e_moped=args.e_moped, n_moped=args.n_moped,
-         density_estimator_type=args.density_estimator_type)
+         density_estimator_type=args.density_estimator_type,
+         coadd_equiv_crosses=not args.coadd_equiv_crosses)
