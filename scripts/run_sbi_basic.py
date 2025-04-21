@@ -258,10 +258,11 @@ def main(odir, config, specdir, r_true, seed, n_train, n_samples, n_rounds, pyil
     seed_all_backends(int(rng_sbi.integers(2 ** 32 - 1)))
 
     data_dict, fixed_params_dict, params_dict = script_utils.parse_config(config)
-    config['param_order'] = param_names # To save the order that we actually used.
-    prior, param_names = script_utils.get_prior(params_dict)
-    prior = MultipleIndependent(prior_list)
+    prior, param_names = script_utils.get_prior(params_dict)    
+    prior = MultipleIndependent(prior)
     prior, num_parameters, prior_returns_numpy = process_prior(prior)
+
+    config['param_order'] = param_names # To save the order that we actually used.
 
     print(f'{prior.mean=}')
     print(f'{prior.stddev=}')
@@ -313,6 +314,9 @@ def main(odir, config, specdir, r_true, seed, n_train, n_samples, n_rounds, pyil
     else:
         data_size = cmb_simulator.size_data
 
+    if comm.rank == 0:
+        print(f'{data_size=}')
+        
     if norm_simple:
         # Draw some simulations from the prior to find a normalization.
         # Ideally this would be done during the first round of inference
@@ -502,4 +506,4 @@ if __name__ == '__main__':
          embed_num_layers=args.embed_num_layers, embed_num_hiddens=args.embed_num_hiddens,
          fmpe=args.fmpe, e_moped=args.e_moped, n_moped=args.n_moped,
          density_estimator_type=args.density_estimator_type,
-         coadd_equiv_crosses=not args.coadd_equiv_crosses)
+         coadd_equiv_crosses=not args.no_coadd_equiv_crosses)

@@ -7,7 +7,7 @@ import os
 import numpy as np
 import healpy as hp
 from pixell import curvedsky
-from optweight import alm_utils, sht, map_utils, mat_utils
+from optweight import alm_utils, sht, map_utils, mat_utils, alm_c_utils
 import healpy as hp
 from jax import grad
 import jax.numpy as jnp
@@ -31,7 +31,7 @@ class CMBSimulator():
     use_dust_map: bool, optional
         Only relevant if using nilc (pyilc dir is not None). Whether
         to build map of dust and include it in auto- and cross-spectra in
-        the data vector    
+        the data vector
     use_dbeta_map: bool, optional
         Only relevant if using nilc (pyilc dir is not None). Whether
         to build map of first moment w.r.t. beta and include it in
@@ -59,7 +59,8 @@ class CMBSimulator():
 
     def __init__(self, specdir, data_dict, fixed_params_dict, pyilcdir=None, use_dust_map=True,
                  use_dbeta_map=False, deproj_dust=False, deproj_dbeta=False, fiducial_beta=None,
-                 fiducial_T_dust=None, odir=None, norm_params=None, score_params=None):
+                 fiducial_T_dust=None, odir=None, norm_params=None, score_params=None,
+                 coadd_equiv_crosses=True):
 
         self.lmax = data_dict['lmax']
         self.lmin = data_dict['lmin']
@@ -76,7 +77,7 @@ class CMBSimulator():
         self.odir = odir
         self.bins = np.arange(self.lmin, self.lmax, self.delta_ell)
         self.coadd_equiv_crosses = coadd_equiv_crosses
-        
+
         self.cov_scalar_ell = spectra_utils.get_cmb_spectra(
             opj(specdir, 'camb_lens_nobb.dat'), self.lmax)
         self.cov_tensor_ell = spectra_utils.get_cmb_spectra(
@@ -88,18 +89,27 @@ class CMBSimulator():
         self.freq_strings = data_dict['freq_strings']
         self.freqs = [so_utils.sat_central_freqs[fstr] for fstr in self.freq_strings]
         self.nfreq = len(self.freqs)
+
+        self.beam_fwhms = [so_utils.sat_beam_fwhms[fstr] for fstr in self.freq_strings]
+        self.b_ells = self.get_gaussian_beams(self.beam_fwhms, self.lmax)
+
         if pyilcdir:
             if not use_dust_map and self.use_dbeta_map:
-                raise ValueError('Cannot use dbeta map wihout dust map.')                
+                raise ValueError('Cannot use dbeta map wihout dust map.')
             self.ncomp = 1
             if self.use_dust_map: self.ncomp += 1
             if self.use_dbeta_map: self.ncomp += 1
-            self.size_data = get_ntri(self.nsplit, self.ncomp) * (self.bins.size - 1)
+            #self.size_data = get_ntri(self.nsplit, self.ncomp) * (self.bins.size - 1)
+            self.sels_to_coadd = get_coadd_sels(self.nsplit, self.ncomp)
+            self.size_data = len(self.sels_to_coadd) * (self.bins.size - 1)
             if self.use_dust_map or self.deproj_dust or self.deproj_dbeta:
                 assert self.fiducial_beta is not None
                 assert self.fiducial_T_dust is not None
         else:
-            self.size_data = get_ntri(self.nsplit, self.nfreq) * (self.bins.size - 1)
+            #self.size_data = get_ntri(self.nsplit, self.nfreq) * (self.bins.size - 1)
+            self.sels_to_coadd = get_coadd_sels(self.nsplit, self.nfreq)
+            self.size_data = len(self.sels_to_coadd) * (self.bins.size - 1)
+            
 
         self.sensitivity_mode = data_dict['sensitivity_mode']
         self.lknee_mode = data_dict['lknee_mode']
@@ -187,6 +197,8 @@ class CMBSimulator():
         cov_ell = cov_ell.at[:].add(spectra_utils.get_combined_cmb_spectrum(
             r_tensor, A_lens, self.cov_scalar_ell, self.cov_tensor_ell)[1,1])
 
+        cov_ell = spectra_utils.apply_beam_to_freq_cov(cov_ell, self.b_ells)
+
         cov_bin = spectra_utils.bin_spectrum(
             cov_ell, np.arange(self.lmax+1), self.bins, self.lmin, self.lmax,
             use_jax=True)
@@ -247,11 +259,11 @@ class CMBSimulator():
         omap = gen_data(
             A_d_BB, alpha_d_BB, beta_dust, self.freq_pivot_dust, self.temp_dust,
             r_tensor, A_lens, self.freqs, seed, self.nsplit, self.noise_cov_ell,
-            self.cov_scalar_ell, self.cov_tensor_ell, self.minfo, self.ainfo,
+            self.cov_scalar_ell, self.cov_tensor_ell, self.b_ells, self.minfo, self.ainfo,
             amp_beta_dust=amp_beta_dust, gamma_beta_dust=gamma_beta_dust)
 
         if self.pyilcdir:
-            # build NILC B-mode maps with shape (nsplit, ncomp=2, npix)
+            # build NILC B-mode maps with shape (nsplit, ncomp, npix).
             nfreq = len(self.freqs)
             B_maps = np.zeros((self.nsplit, nfreq, self.minfo.npix))
             tmp_alm = np.zeros((2, self.ainfo.nelem), dtype=np.complex128) # E, B temp.
@@ -265,8 +277,8 @@ class CMBSimulator():
             map_tmpdir = nilc_utils.write_maps(B_maps, output_dir=self.odir)
             nilc_maps = nilc_utils.get_nilc_maps(
                 self.pyilcdir, map_tmpdir, self.nsplit, self.nside, self.fiducial_beta,
-                self.fiducial_T_dust, self.freq_pivot_dust, so_utils.sat_central_freqs,
-                so_utils.sat_beam_fwhms, use_dust_map=self.use_dust_map, use_dbeta_map=self.use_dbeta_map,
+                self.fiducial_T_dust, self.freq_pivot_dust, self.freqs,
+                self.beam_fwhms, use_dust_map=self.use_dust_map, use_dbeta_map=self.use_dbeta_map,
                 deproj_dust=self.deproj_dust, deproj_dbeta=self.deproj_dbeta, output_dir=self.odir,
                 remove_files=True, debug=False)
             spectra = estimate_spectra_nilc(nilc_maps, self.minfo, self.ainfo)
@@ -275,10 +287,10 @@ class CMBSimulator():
             spectra = estimate_spectra(omap, self.minfo, self.ainfo)
 
         if self.coadd_equiv_crosses:
-            # coadd spectra        
+            # coadd spectra
             ncomps = self.nfreq if self.pyilcdir is None else self.ncomp
-            spectra = coadd(spectra, self.nsplit, ncomps, self.lmax)
-            
+            spectra = coadd(spectra, self.sels_to_coadd)
+
         data = get_final_data_vector(spectra, self.bins, self.lmin, self.lmax)
 
         if self.norm_params:
@@ -334,6 +346,34 @@ class CMBSimulator():
         data = data.reshape(-1)
 
         return data
+
+    @staticmethod
+    def get_gaussian_beams(fwhms, lmax):
+        '''
+        Return Gaussian harmonic beam functions.
+
+        Parameters
+        ----------
+        fwhms : (nfreq,) array-like
+            List of FWHM values in arcmin.
+        lmax : int
+            Max multipole of output.
+
+        Returns
+        -------
+        b_ells : (nfreq, lmax + 1) array
+            Beam functions.
+        '''
+
+        fwhms = np.atleast_1d(fwhms)
+        nfreq = len(fwhms)
+
+        out = np.zeros((nfreq, lmax + 1))
+
+        for fidx, fwhm in enumerate(fwhms):
+            out[fidx] = hp.gauss_beam(np.radians(fwhm / 60), lmax=lmax)
+
+        return out
 
 def get_delta_beta_cl(amp, gamma, lmax, ell_0=1, ell_cutoff=1):
     '''
@@ -406,7 +446,7 @@ def get_beta_map(minfo, ainfo, beta0, amp, gamma, seed, ell_0=1, ell_cutoff=1):
 
 def gen_data(A_d_BB, alpha_d_BB, beta_dust, freq_pivot_dust, temp_dust,
              r_tensor, A_lens, freqs, seed, nsplit, cov_noise_ell,
-             cov_scalar_ell, cov_tensor_ell, minfo, ainfo,
+             cov_scalar_ell, cov_tensor_ell, b_ells, minfo, ainfo,
              amp_beta_dust=None, gamma_beta_dust=None):
     '''
     Generate simulated maps.
@@ -439,6 +479,8 @@ def gen_data(A_d_BB, alpha_d_BB, beta_dust, freq_pivot_dust, temp_dust,
         Signal covariance matrix with the EE and BB spectra from scalar perturbations.
     cov_tensor_ell : (npol, nell) array
         Signal covariance matrix with the EE and BB spectra from tensor perturbations.
+    b_ells : (nfreq, nell) array
+        Beam for each frequency.
     minfo : optweight.map_utils.MapInfo object
         Geometry of output map.
     ainfo : pixell.curvedsky.alm_info object
@@ -488,23 +530,23 @@ def gen_data(A_d_BB, alpha_d_BB, beta_dust, freq_pivot_dust, temp_dust,
         # Generate the dust beta map.
         beta_dust = get_beta_map(minfo, ainfo, beta_dust, amp_beta_dust, gamma_beta_dust, rng_beta)
 
-        gen_data_per_freq = lambda freq, cov_noise_ell: _gen_data_per_freq_gamma(
+        gen_data_per_freq = lambda freq, cov_noise_ell, b_ell: _gen_data_per_freq_gamma(
             freq, cov_noise_ell, beta_dust, temp_dust, freq_pivot_dust, A_d_BB,
-            cmb_alm, dust_map, nsplit, rngs_noise, ainfo, minfo)
+            cmb_alm, dust_map, nsplit, rngs_noise, ainfo, minfo, b_ell)
 
     else:
-        gen_data_per_freq = lambda freq, cov_noise_ell: _gen_data_per_freq_simple(
+        gen_data_per_freq = lambda freq, cov_noise_ell, b_ell: _gen_data_per_freq_simple(
             freq, cov_noise_ell, beta_dust, temp_dust, freq_pivot_dust, A_d_BB,
-            cmb_alm, dust_alm, nsplit, rngs_noise, ainfo, minfo)
+            cmb_alm, dust_alm, nsplit, rngs_noise, ainfo, minfo, b_ell)
 
     for fidx, freq in enumerate(freqs):
 
-        out[:,fidx,:,:] = gen_data_per_freq(freq, cov_noise_ell[fidx])
+        out[:,fidx,:,:] = gen_data_per_freq(freq, cov_noise_ell[fidx], b_ells[fidx])
 
     return out
 
 def _gen_data_per_freq_simple(freq, cov_noise_ell, beta_dust, temp_dust, freq_pivot_dust, A_d_BB,
-                              cmb_alm, dust_alm, nsplit, rngs_noise, ainfo, minfo):
+                              cmb_alm, dust_alm, nsplit, rngs_noise, ainfo, minfo, b_ell):
     '''
     Generate data for a given frequency, using a data model with constant beta.
 
@@ -534,6 +576,8 @@ def _gen_data_per_freq_simple(freq, cov_noise_ell, beta_dust, temp_dust, freq_pi
         Layout of spherical harmonic coefficients.
     minfo : optweight.map_utils.MapInfo object
         Geometry of output map.
+    b_ell : (lmax + 1) array
+        Beam for this frequency.
 
     Returns
     -------
@@ -550,6 +594,9 @@ def _gen_data_per_freq_simple(freq, cov_noise_ell, beta_dust, temp_dust, freq_pi
     signal_alm = cmb_alm.copy()
     signal_alm += dust_alm * np.sqrt(dust_factor * np.abs(A_d_BB)) * g_factor * np.sign(A_d_BB)
 
+    # Apply beam.
+    signal_alm = alm_c_utils.lmul(signal_alm, b_ell, ainfo, inplace=False)
+
     for sidx in range(nsplit):
 
         data_alm = signal_alm + alm_utils.rand_alm(
@@ -560,7 +607,7 @@ def _gen_data_per_freq_simple(freq, cov_noise_ell, beta_dust, temp_dust, freq_pi
     return out
 
 def _gen_data_per_freq_gamma(freq, cov_noise_ell, beta_dust, temp_dust, freq_pivot_dust, A_d_BB,
-                             cmb_alm, dust_map, nsplit, rngs_noise, ainfo, minfo):
+                             cmb_alm, dust_map, nsplit, rngs_noise, ainfo, minfo, b_ell):
     '''
     Generate data for a given frequency, using a data model with varying beta.
 
@@ -590,6 +637,8 @@ def _gen_data_per_freq_gamma(freq, cov_noise_ell, beta_dust, temp_dust, freq_piv
         Layout of spherical harmonic coefficients.
     minfo : optweight.map_utils.MapInfo object
         Geometry of output map.
+    b_ell : (lmax + 1) array
+        Beam for this frequency.
 
     Returns
     -------
@@ -604,7 +653,12 @@ def _gen_data_per_freq_gamma(freq, cov_noise_ell, beta_dust, temp_dust, freq_piv
     # Apply spatially varying SED scaling in real space.
     sed_map = spectra_utils.get_sed_dust(freq, beta_dust, temp_dust, freq_pivot_dust)
     scaled_dust_map = dust_map * np.sqrt(np.abs(A_d_BB) * sed_map) * g_factor * np.sign(A_d_BB)
-    signal_alm = cmb_alm.copy()
+
+    # Apply beam.
+    dust_alm = np.zeros(cmb_alm.shape, dtype=np.complex128)
+    sht.map2alm(scaled_dust_map, dust_alm, minfo, ainfo, 2)
+    signal_alm = cmb_alm + dust_alm
+    signal_alm = alm_c_utils.lmul(signal_alm, b_ell, ainfo, inplace=False)
 
     for sidx in range(nsplit):
 
@@ -612,7 +666,6 @@ def _gen_data_per_freq_gamma(freq, cov_noise_ell, beta_dust, temp_dust, freq_piv
             cov_noise_ell, ainfo, rngs_noise[sidx], dtype=np.complex128)
         data_alm = np.asarray(data_alm, dtype=np.complex128)
         sht.alm2map(data_alm, out[sidx], ainfo, minfo, 2)
-        out[sidx] += scaled_dust_map
 
     return out
 
@@ -777,45 +830,64 @@ def estimate_spectra_nilc(imap, minfo, ainfo):
 
     return out
 
-def coadd(spec, nsplits, ncomps, ellmax): 
-    ''' 
-    Coadd cross-spectra from different splits
+def get_coadd_sels(nsplits, ncomps):
+    '''
+    Find list of index lists that will coadd equivalent cross-spectra in
+    the datavector, i.e. comp1 x comp2 and comp2 x comp1.
 
-    Parameters 
-    ---------- 
-    spec: (ntri, 1, lmax + 1) array
-        Input spectra.
+    Parameters
+    ----------
     nsplits: int
         Number of splits.
     ncomps: int
         Number of frequencies or number of components.
-    ellmax: int
-        Maximum ell.
-    
-    Returns 
-    ------- 
-    final_spectra: (len(sels_to_coadd), 1, ellmax + 1) array
-        Coadded spectra .
-    '''
-    
-    sidx1, cidx1, sidx2, cidx2 = (get_tri_indices(nsplits, ncomps)).T 
-    ntri = get_ntri(nsplits, ncomps)
 
-    # Extract the unique cidx1, cidx2 combinations and puts them in unique_combs.
-    pairs = [tuple(sorted((cidx1[i], cidx2[i]))) for i in range(ntri)] 
-    unique_combs = sorted(set(pairs)) 
+    Returns
+    -------
+    sels_to_coadd : (n_unique) list of index arrays.
+        List of index arrays containing elements in data vector to coadd.
+    '''
+
+    sidx1, cidx1, sidx2, cidx2 = get_tri_indices(nsplits, ncomps).T
+    ntri = get_ntri(nsplits, ncomps)
+    assert sidx1.size == ntri
+
+    # Extract the unique cidx1, cidx2 combinations and put them in unique_combs.
+    pairs = [tuple(sorted((cidx1[i], cidx2[i]))) for i in range(ntri)]
+    unique_combs = sorted(set(pairs))
 
     # List of length len(unique_combs) where each elements is another list of indices.
-    sels_to_coadd = [] 
-    for comb in unique_combs: 
-        sel = [i for i in range(ntri) if tuple(sorted((cidx1[i], cidx2[i]))) == comb] 
+    sels_to_coadd = []
+    for comb in unique_combs:
+        sel = [i for i in range(ntri) if tuple(sorted((cidx1[i], cidx2[i]))) == comb]
         sels_to_coadd.append(sel)
-    
-    # Do the actual coadding.
-    final_spectra = np.zeros((len(sels_to_coadd), 1, ellmax + 1)) 
-    for idx, selections in enumerate(sels_to_coadd): 
+
+    return sels_to_coadd
+
+def coadd(spec, sels_to_coadd):
+    '''
+    Coadd cross-spectra from different splits
+
+    Parameters
+    ----------
+    spec: (ntri, 1, lmax + 1) array
+        Input spectra to coadd.
+    sels_to_coadd : (n_unique) list of index arrays.
+        List of index arrays containing elements in data vector to coadd.
+        See `get_coadd_sels`.
+
+    Returns
+    -------
+    final_spectra: (len(sels_to_coadd), 1, ellmax + 1) array
+        Coadded spectra.
+    '''
+
+    nell = spec.shape[-1]
+    final_spectra = np.zeros((len(sels_to_coadd), 1, nell))
+
+    for idx, selections in enumerate(sels_to_coadd):
         final_spectra[idx,0,:] = spec[selections,0,:].mean(axis=0)
-        
+
     return final_spectra
 
 def get_final_data_vector(spec, bins, lmin, lmax):

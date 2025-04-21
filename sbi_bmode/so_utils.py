@@ -1,7 +1,7 @@
 import numpy as np
 from scipy.sparse import load_npz
 
-sat_beam_fwhms = {'f030' : 91., 'f040' : 63., 'f090' : 30., 'f150' : 17., 'f230' : 11., f'290' : 9.}
+sat_beam_fwhms = {'f030' : 91., 'f040' : 63., 'f090' : 30., 'f150' : 17., 'f230' : 11., f'f290' : 9.}
 
 sat_central_freqs = {'f030' : 27., 'f040' : 39., 'f090' : 93., 'f150' : 145., 'f230' : 225., 'f290' : 280.}
 

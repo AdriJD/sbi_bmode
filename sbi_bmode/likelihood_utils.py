@@ -73,7 +73,7 @@ class TrunactedNormal(Normal):
         upper = (self.upper - self.mean) / self.sigma
 
         draw = random.truncated_normal(key, lower, upper)
-        return = draw * self.sigma + self.mean
+        return draw * self.sigma + self.mean
     
 class HalfNormal():
     '''

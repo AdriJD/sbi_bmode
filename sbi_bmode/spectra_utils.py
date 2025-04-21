@@ -242,21 +242,20 @@ def get_dust_spectra(amp, alpha, lmax, freqs, beta, temp, freq_pivot):
         Amplitude
     alpha : float
         Multipole power law index.
-    bins : (nbin + 1) array
-        Output bins. Specify the rightmost edge.
     lmax : int
         Maximum multipole.
     freqs : (nfreq) array
         Effective frequencies of bands.
     beta : float
+        Dust frequency spectral index.
     temp : float
-        Dust temperature
+        Dust temperature.
     freq_pivot : float
         Frequency pivot scale.
     
     Returns
     -------
-    out : (nfreq, nfreq, nbin) array
+    out : (nfreq, nfreq, lmax + 1) array
         Cross spectra.
     '''
     
@@ -280,13 +279,22 @@ def get_dust_spectra(amp, alpha, lmax, freqs, beta, temp, freq_pivot):
             
     return out
 
+def apply_beam_to_freq_cov(cov_ell, beams):
+    '''
+    Apply per-frequency beams to a nfreq x nfreq covariance matrix.
 
+    Parameters
+    ----------
+    cov_ell : (nfreq, nfreq, lmax + 1) array
+        Covariance matrix.
+    beams : (nfreq, lmax + 1) array
+        Beams per frequency.
+    '''
 
+    nfreq = beams.shape[0]
+    beam_mat = jnp.eye(nfreq)[:,:,jnp.newaxis] * beams
 
-
-
-
-
+    return jnp.einsum('abl, bcl, cdl -> adl', beam_mat, cov_ell, beam_mat)
     
 def get_sed_sync(freq, beta, freq_pivot):
     '''

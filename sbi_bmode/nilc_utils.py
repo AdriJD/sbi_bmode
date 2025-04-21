@@ -28,7 +28,7 @@ def write_maps(B_maps, output_dir=None):
 
 
 def get_nilc_maps(pyilc_path, map_tmpdir, nsplit, nside, fiducial_beta, fiducial_T_dust, freq_pivot_dust, 
-                  sat_central_freqs, sat_beam_fwhms, use_dust_map=True, use_dbeta_map=False, 
+                  central_freqs, beam_fwhms, use_dust_map=True, use_dbeta_map=False, 
                   deproj_dust=False, deproj_dbeta=False,
                   output_dir=None, remove_files=True, debug=False):
     '''
@@ -41,8 +41,8 @@ def get_nilc_maps(pyilc_path, map_tmpdir, nsplit, nside, fiducial_beta, fiducial
     fiducial_beta: float, beta dust parameter
     fiducial_T_dust: float, temperature of dust
     freq_pivot_dust: float, pivot frequency of dust
-    sat_central_freqs: dict, maps frequency strings to floats representing frequencies
-    sat_beam_fwhms: dict, maps frequency strings to floats representing beam FWHM
+    central_freqs: array-like, list of floats representing frequencies
+    beam_fwhms: array-like, list of floats representing beam FWHM
     use_dust_map: Bool, whether to produce dust map.
     use_dbeta_map: Bool, whethert o build map of first moment w.r.t. beta
     deproj_dust: Bool, Whether to deproject dust in CMB NILC map.
@@ -84,13 +84,13 @@ def get_nilc_maps(pyilc_path, map_tmpdir, nsplit, nside, fiducial_beta, fiducial
         pyilc_input_params['N_scales'] = 4
         pyilc_input_params['GN_FWHM_arcmin'] = [300., 120., 60.] 
         pyilc_input_params['taper_width'] = 0
-        pyilc_input_params['N_freqs'] = len(sat_central_freqs)
-        pyilc_input_params['freqs_delta_ghz'] = list(sat_central_freqs.values())
+        pyilc_input_params['N_freqs'] = len(central_freqs)
+        pyilc_input_params['freqs_delta_ghz'] = central_freqs
         pyilc_input_params['N_side'] = nside
         pyilc_input_params['wavelet_type'] = "GaussianNeedlets"
         pyilc_input_params['bandpass_type'] = "DeltaBandpasses"
         pyilc_input_params['beam_type'] = "Gaussians"
-        pyilc_input_params['beam_FWHM_arcmin'] = list(sat_beam_fwhms.values())
+        pyilc_input_params['beam_FWHM_arcmin'] = beam_fwhms
         pyilc_input_params['ILC_bias_tol'] = 0.01
         pyilc_input_params['N_deproj'] = 0
         pyilc_input_params['N_SED_params'] = 0
