@@ -59,6 +59,8 @@ run33b	like run30, but 2x sims, cmb + deprojection dust
 run33c	like run30, but 2x sims, cmb + deprojection dust + deprojection dbeta
 run34a	like run30 but with beams
 run34b	like run30 but with coadded cross spectra
+run34c	like run34b but with highpass filter
+rim34d	like run34c but with nilc lmax = 2*nside
 
 
 mcmc33  

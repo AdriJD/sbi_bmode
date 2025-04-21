@@ -10,6 +10,7 @@ data:
   fsky: 0.1
   cov_scalar_ell: "camb_lens_nobb.dat"
   cov_tensor_ell: "camb_lens_r1.dat"
+  highpass_delta_ell: 5
 
 fixed_params:
   freq_pivot_dust: 353

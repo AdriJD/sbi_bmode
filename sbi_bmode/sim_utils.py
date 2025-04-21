@@ -22,7 +22,7 @@ class CMBSimulator():
 
     Parameters
     ----------
-    specdir : str
+    specdir: str
         Path to data directory containing power spectrum files.
     data_dict:
     fixed_params_dict:
@@ -53,14 +53,16 @@ class CMBSimulator():
     score_params: dict, optional
         Parameters of fiducial model where the score is evaluted for score
         compression.
-    coadd_equiv_crosses : bool, optional
-        Whtether to use the mean of e.g. comp1 x comp2 and comp2 x comp1 spectra.
+    coadd_equiv_crosses: bool, optional
+        Whether to use the mean of e.g. comp1 x comp2 and comp2 x comp1 spectra.
+    apply_highpass_filter: bool, optional
+        Filter out signal modes below lmin in the simulations.
     '''
 
     def __init__(self, specdir, data_dict, fixed_params_dict, pyilcdir=None, use_dust_map=True,
                  use_dbeta_map=False, deproj_dust=False, deproj_dbeta=False, fiducial_beta=None,
                  fiducial_T_dust=None, odir=None, norm_params=None, score_params=None,
-                 coadd_equiv_crosses=True):
+                 coadd_equiv_crosses=True, apply_highpass_filter=True):
 
         self.lmax = data_dict['lmax']
         self.lmin = data_dict['lmin']
@@ -92,7 +94,12 @@ class CMBSimulator():
 
         self.beam_fwhms = [so_utils.sat_beam_fwhms[fstr] for fstr in self.freq_strings]
         self.b_ells = self.get_gaussian_beams(self.beam_fwhms, self.lmax)
-
+        if apply_highpass_filter:
+            self.highpass_filter = get_highpass_filter(
+                self.lmin, self.lmax, data_dict['highpass_delta_ell'])
+        else:
+            self.highpass_filter = None
+            
         if pyilcdir:
             if not use_dust_map and self.use_dbeta_map:
                 raise ValueError('Cannot use dbeta map wihout dust map.')
@@ -260,7 +267,8 @@ class CMBSimulator():
             A_d_BB, alpha_d_BB, beta_dust, self.freq_pivot_dust, self.temp_dust,
             r_tensor, A_lens, self.freqs, seed, self.nsplit, self.noise_cov_ell,
             self.cov_scalar_ell, self.cov_tensor_ell, self.b_ells, self.minfo, self.ainfo,
-            amp_beta_dust=amp_beta_dust, gamma_beta_dust=gamma_beta_dust)
+            amp_beta_dust=amp_beta_dust, gamma_beta_dust=gamma_beta_dust,
+            signal_filter=self.highpass_filter)
 
         if self.pyilcdir:
             # build NILC B-mode maps with shape (nsplit, ncomp, npix).
@@ -447,7 +455,7 @@ def get_beta_map(minfo, ainfo, beta0, amp, gamma, seed, ell_0=1, ell_cutoff=1):
 def gen_data(A_d_BB, alpha_d_BB, beta_dust, freq_pivot_dust, temp_dust,
              r_tensor, A_lens, freqs, seed, nsplit, cov_noise_ell,
              cov_scalar_ell, cov_tensor_ell, b_ells, minfo, ainfo,
-             amp_beta_dust=None, gamma_beta_dust=None):
+             amp_beta_dust=None, gamma_beta_dust=None, signal_filter=None):
     '''
     Generate simulated maps.
 
@@ -489,6 +497,8 @@ def gen_data(A_d_BB, alpha_d_BB, beta_dust, freq_pivot_dust, temp_dust,
         Amplitude of dust beta power spectrum at pivot multipole.
     gamma_beta_dust : float, optional
         Tilt of dust beta power spectrum.
+    signal_filter : (nell) array. optional
+        Harmonic filter that is applied to the signal (similar to beam).
 
     Returns
     -------
@@ -540,8 +550,11 @@ def gen_data(A_d_BB, alpha_d_BB, beta_dust, freq_pivot_dust, temp_dust,
             cmb_alm, dust_alm, nsplit, rngs_noise, ainfo, minfo, b_ell)
 
     for fidx, freq in enumerate(freqs):
-
-        out[:,fidx,:,:] = gen_data_per_freq(freq, cov_noise_ell[fidx], b_ells[fidx])
+        
+        b_ell = b_ells[fidx]
+        if signal_filter is not None:
+            b_ell = b_ell * signal_filter
+        out[:,fidx,:,:] = gen_data_per_freq(freq, cov_noise_ell[fidx], b_ell)
 
     return out
 
@@ -920,3 +933,34 @@ def get_final_data_vector(spec, bins, lmin, lmax):
         out[idxs] = spectra_utils.bin_spectrum(spec[idxs], ells, bins, lmin, lmax)
 
     return out.reshape(-1)
+
+def get_highpass_filter(lmin, lmax, delta_ell):
+    '''
+    Return a filter that smoothly transitions from 0 below lmin - delta_ell
+    to 1 above lmin.
+
+    Parameters
+    ----------
+    lmin : int
+        Multipole above which the filter is 1.
+    lmax : int
+        Maximum multipole.
+    delta_ell : int
+        Wdith of filter below lmin.
+
+    Returns
+    -------
+    f_ell : (lmax + 1) array
+        Filter.
+    '''
+
+    f_ell = np.ones(lmax + 1)
+    assert delta_ell > 0
+    assert (lmin - delta_ell) >= 0
+
+    ells = np.arange(delta_ell)    
+    transition = 0.5 * (1 + np.cos(ells * np.pi / delta_ell))
+    f_ell[lmin-delta_ell+1:lmin+1] = transition[::-1]
+    f_ell[:lmin-delta_ell+1] = 0
+
+    return f_ell

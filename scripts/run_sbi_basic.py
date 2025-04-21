@@ -173,7 +173,7 @@ def main(odir, config, specdir, r_true, seed, n_train, n_samples, n_rounds, pyil
          use_dbeta_map, deproj_dust, deproj_dbeta, fiducial_beta, fiducial_T_dust,
          no_norm=False, score_compress=False, embed=False, embed_num_layers=2,
          embed_num_hiddens=25, fmpe=False, e_moped=False, n_moped=None, density_estimator_type='maf',
-         coadd_equiv_crosses=True):
+         coadd_equiv_crosses=True, apply_highpass_filter=True):
     '''
     Run SBI.
 
@@ -238,7 +238,9 @@ def main(odir, config, specdir, r_true, seed, n_train, n_samples, n_rounds, pyil
     density_estimator_type : str, optional
         String denoting density estimator for NPE.
     coadd_equiv_crosses : bool, optional
-        Whtether to use the mean of e.g. comp1 x comp2 and comp2 x comp1 spectra.    
+        Whether to use the mean of e.g. comp1 x comp2 and comp2 x comp1 spectra.
+    apply_highpass_filter: bool, optional
+        Filter out signal modes below lmin in the simulations.
     '''
 
     if score_compress and e_moped:
@@ -483,6 +485,8 @@ if __name__ == '__main__':
                         help="pick from 'nsf', 'maf', 'mdn', 'made', 'zuko_maf' or 'zuko_nsf'")
     parser.add_argument('--no-coadd-equiv-crosses', action='store_true',
                         help='Do not coadd comp1 x comp2 and comp2 x comp1 cross spectra in data vector')
+    parser.add_argument('--no-highpass-filter', action='store_true',
+                        help='Do not remove signal below lmin in simulated maps.')
     
     args = parser.parse_args()
 
@@ -506,4 +510,5 @@ if __name__ == '__main__':
          embed_num_layers=args.embed_num_layers, embed_num_hiddens=args.embed_num_hiddens,
          fmpe=args.fmpe, e_moped=args.e_moped, n_moped=args.n_moped,
          density_estimator_type=args.density_estimator_type,
-         coadd_equiv_crosses=not args.no_coadd_equiv_crosses)
+         coadd_equiv_crosses=not args.no_coadd_equiv_crosses,
+         apply_highpass_filter=not args.no_highpass_filter)
