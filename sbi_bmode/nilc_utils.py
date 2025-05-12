@@ -39,9 +39,9 @@ def get_nilc_maps(pyilc_path, map_tmpdir, nsplit, nside, fiducial_beta, fiducial
     nsplit: int, number of splits
     nside: int, resolution parameter for maps
     fiducial_beta: float, beta dust parameter
-    fiducial_T_dust: float, temperature of dust
-    freq_pivot_dust: float, pivot frequency of dust
-    central_freqs: array-like, list of floats representing frequencies
+    fiducial_T_dust: float, temperature of dust in K.
+    freq_pivot_dust: float, pivot frequency of dust in Hz.
+    central_freqs: array-like, list of floats representing frequencies in Hz.
     beam_fwhms: array-like, list of floats representing beam FWHM
     use_dust_map: Bool, whether to produce dust map.
     use_dbeta_map: Bool, whethert o build map of first moment w.r.t. beta
@@ -71,6 +71,9 @@ def get_nilc_maps(pyilc_path, map_tmpdir, nsplit, nside, fiducial_beta, fiducial
     # current environment, also environment in which to run subprocesses
     env = os.environ.copy()
 
+    # Convert to Ghz.
+    central_freqs = [nu * 1e-9 for nu in central_freqs]
+    
     for split in range(nsplit):
 
         nilc_tmpdir = tempfile.mkdtemp(dir=output_dir)
@@ -101,7 +104,7 @@ def get_nilc_maps(pyilc_path, map_tmpdir, nsplit, nside, fiducial_beta, fiducial
 
         #Dust parameters
         pars = {'beta_CIB': float(fiducial_beta), 'Tdust_CIB': float(fiducial_T_dust),
-                'nu0_CIB_ghz': float(freq_pivot_dust),
+                'nu0_CIB_ghz': float(freq_pivot_dust) * 1e-9,
                 'kT_e_keV':5.0, 'nu0_radio_ghz':150.0, 'beta_radio': -0.5}
         dust_pars_yaml = f'{nilc_tmpdir}/dust_pars.yaml'
         with open(dust_pars_yaml, 'w') as outfile:

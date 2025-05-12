@@ -12,7 +12,7 @@ data:
   cov_tensor_ell: "camb_lens_r1.dat"
 
 fixed_params:
-  freq_pivot_dust: 353
+  freq_pivot_dust: 353.0e+9
   temp_dust: 19.6
 
 params:

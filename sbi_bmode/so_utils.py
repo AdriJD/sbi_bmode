@@ -1,10 +1,13 @@
 import numpy as np
 from scipy.sparse import load_npz
 
+# In arcmin.
 sat_beam_fwhms = {'f030' : 91., 'f040' : 63., 'f090' : 30., 'f150' : 17., 'f230' : 11., f'f290' : 9.}
 
-sat_central_freqs = {'f030' : 27., 'f040' : 39., 'f090' : 93., 'f150' : 145., 'f230' : 225., 'f290' : 280.}
+# In Hz.
+sat_central_freqs = {'f030' : 27e9, 'f040' : 39e9, 'f090' : 93e9, 'f150' : 145e9, 'f230' : 225e9, 'f290' : 280e9}
 
+# In uK arcmin.
 sat_noise_level = {'f030' : {'baseline' : 21, 'goal' : 15},
                    'f040' : {'baseline' : 13, 'goal' : 10},
                    'f090' : {'baseline' : 3.4, 'goal' : 2.4},

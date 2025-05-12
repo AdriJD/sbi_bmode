@@ -24,8 +24,10 @@ class CMBSimulator():
     ----------
     specdir: str
         Path to data directory containing power spectrum files.
-    data_dict:
-    fixed_params_dict:
+    data_dict : dict
+        Dictionary with data generation parameters.
+    fixed_params_dict : dict
+        Dictionary with parameter names and values that we keep fixed.
     pyilcdir: str
         Path to pyilc respository. Setting to None means NILC is not used.
     use_dust_map: bool, optional
@@ -90,6 +92,7 @@ class CMBSimulator():
 
         self.freq_strings = data_dict['freq_strings']
         self.freqs = [so_utils.sat_central_freqs[fstr] for fstr in self.freq_strings]
+        assert np.all(np.asarray(self.freqs) > 1e9), 'Frequencies have to be in Ghz.'
         self.nfreq = len(self.freqs)
 
         self.beam_fwhms = [so_utils.sat_beam_fwhms[fstr] for fstr in self.freq_strings]
@@ -106,18 +109,15 @@ class CMBSimulator():
             self.ncomp = 1
             if self.use_dust_map: self.ncomp += 1
             if self.use_dbeta_map: self.ncomp += 1
-            #self.size_data = get_ntri(self.nsplit, self.ncomp) * (self.bins.size - 1)
             self.sels_to_coadd = get_coadd_sels(self.nsplit, self.ncomp)
             self.size_data = len(self.sels_to_coadd) * (self.bins.size - 1)
             if self.use_dust_map or self.deproj_dust or self.deproj_dbeta:
                 assert self.fiducial_beta is not None
                 assert self.fiducial_T_dust is not None
         else:
-            #self.size_data = get_ntri(self.nsplit, self.nfreq) * (self.bins.size - 1)
             self.sels_to_coadd = get_coadd_sels(self.nsplit, self.nfreq)
             self.size_data = len(self.sels_to_coadd) * (self.bins.size - 1)
             
-
         self.sensitivity_mode = data_dict['sensitivity_mode']
         self.lknee_mode = data_dict['lknee_mode']
         self.noise_cov_ell = np.ones((self.nfreq, 2, 2, self.lmax + 1))
@@ -132,6 +132,7 @@ class CMBSimulator():
 
         # Fixed parameters.
         self.freq_pivot_dust = fixed_params_dict['freq_pivot_dust']
+        assert self.freq_pivot_dust > 1e9, "Freq pivot dust has to be in GHz."
         self.temp_dust = fixed_params_dict['temp_dust']
 
         self.norm_params = norm_params
@@ -271,10 +272,9 @@ class CMBSimulator():
             signal_filter=self.highpass_filter)
 
         if self.pyilcdir:
-            # build NILC B-mode maps with shape (nsplit, ncomp, npix).
-            nfreq = len(self.freqs)
-            B_maps = np.zeros((self.nsplit, nfreq, self.minfo.npix))
-            tmp_alm = np.zeros((2, self.ainfo.nelem), dtype=np.complex128) # E, B temp.
+            # build NILC B-mode maps.
+            B_maps = np.zeros((self.nsplit, self.nfreq, self.minfo.npix))
+            tmp_alm = np.zeros((2, self.ainfo.nelem), dtype=np.complex128) # E, B.
             for split in range(self.nsplit):
                 for f, freq_str in enumerate(self.freq_strings):
                     sht.map2alm(omap[split,f], tmp_alm, self.minfo, self.ainfo, 2)
@@ -526,7 +526,8 @@ def gen_data(A_d_BB, alpha_d_BB, beta_dust, freq_pivot_dust, temp_dust,
 
     # Generate frequency-independent signal, scale with frequency later.
     cov_dust_ell[1,1] = spectra_utils.get_ell_shape(lmax, alpha_d_BB, ell_pivot=80)
-
+    cov_dust_ell[1,1] *= A_d_BB
+    
     cmb_alm = alm_utils.rand_alm(cov_ell, ainfo, rng_cmb, dtype=np.complex128)
     dust_alm = alm_utils.rand_alm(cov_dust_ell, ainfo, rng_dust, dtype=np.complex128)
 
@@ -541,12 +542,12 @@ def gen_data(A_d_BB, alpha_d_BB, beta_dust, freq_pivot_dust, temp_dust,
         beta_dust = get_beta_map(minfo, ainfo, beta_dust, amp_beta_dust, gamma_beta_dust, rng_beta)
 
         gen_data_per_freq = lambda freq, cov_noise_ell, b_ell: _gen_data_per_freq_gamma(
-            freq, cov_noise_ell, beta_dust, temp_dust, freq_pivot_dust, A_d_BB,
+            freq, cov_noise_ell, beta_dust, temp_dust, freq_pivot_dust,
             cmb_alm, dust_map, nsplit, rngs_noise, ainfo, minfo, b_ell)
 
     else:
         gen_data_per_freq = lambda freq, cov_noise_ell, b_ell: _gen_data_per_freq_simple(
-            freq, cov_noise_ell, beta_dust, temp_dust, freq_pivot_dust, A_d_BB,
+            freq, cov_noise_ell, beta_dust, temp_dust, freq_pivot_dust,
             cmb_alm, dust_alm, nsplit, rngs_noise, ainfo, minfo, b_ell)
 
     for fidx, freq in enumerate(freqs):
@@ -558,7 +559,7 @@ def gen_data(A_d_BB, alpha_d_BB, beta_dust, freq_pivot_dust, temp_dust,
 
     return out
 
-def _gen_data_per_freq_simple(freq, cov_noise_ell, beta_dust, temp_dust, freq_pivot_dust, A_d_BB,
+def _gen_data_per_freq_simple(freq, cov_noise_ell, beta_dust, temp_dust, freq_pivot_dust,
                               cmb_alm, dust_alm, nsplit, rngs_noise, ainfo, minfo, b_ell):
     '''
     Generate data for a given frequency, using a data model with constant beta.
@@ -574,9 +575,7 @@ def _gen_data_per_freq_simple(freq, cov_noise_ell, beta_dust, temp_dust, freq_pi
     temp_dust : float
         Dust temperature for the blackbody part of the model.
     freq_pivot_dust : float
-        Pivot frequency for the frequency power law.
-    A_d_BB : float
-        Dust amplitude.
+        Pivot frequency for the frequency power law in Hz.
     cmb_alm : (2, nelem) complex array
         CMB E- and B-mode alms.
     dust_alm : (2, nelem) complex array
@@ -602,10 +601,10 @@ def _gen_data_per_freq_simple(freq, cov_noise_ell, beta_dust, temp_dust, freq_pi
 
     dust_factor = spectra_utils.get_sed_dust(
         freq, beta_dust, temp_dust, freq_pivot_dust)
-    g_factor = spectra_utils.get_g_fact(freq)
+    g_factor = spectra_utils.get_g_fact(freq) / spectra_utils.get_g_fact(freq_pivot_dust)
 
     signal_alm = cmb_alm.copy()
-    signal_alm += dust_alm * np.sqrt(dust_factor * np.abs(A_d_BB)) * g_factor * np.sign(A_d_BB)
+    signal_alm += dust_alm * np.sqrt(dust_factor) * g_factor
 
     # Apply beam.
     signal_alm = alm_c_utils.lmul(signal_alm, b_ell, ainfo, inplace=False)
@@ -619,7 +618,7 @@ def _gen_data_per_freq_simple(freq, cov_noise_ell, beta_dust, temp_dust, freq_pi
 
     return out
 
-def _gen_data_per_freq_gamma(freq, cov_noise_ell, beta_dust, temp_dust, freq_pivot_dust, A_d_BB,
+def _gen_data_per_freq_gamma(freq, cov_noise_ell, beta_dust, temp_dust, freq_pivot_dust,
                              cmb_alm, dust_map, nsplit, rngs_noise, ainfo, minfo, b_ell):
     '''
     Generate data for a given frequency, using a data model with varying beta.
@@ -636,8 +635,6 @@ def _gen_data_per_freq_gamma(freq, cov_noise_ell, beta_dust, temp_dust, freq_piv
         Dust temperature for the blackbody part of the model.
     freq_pivot_dust : float
         Pivot frequency for the frequency power law.
-    A_d_BB : float
-        Dust amplitude.
     cmb_alm : (2, nelem) complex array
         CMB E- and B-mode alms.
     dust_map : (2, nelem) complex array
@@ -661,11 +658,11 @@ def _gen_data_per_freq_gamma(freq, cov_noise_ell, beta_dust, temp_dust, freq_piv
 
     out = np.zeros((nsplit, 2, minfo.npix))
 
-    g_factor = spectra_utils.get_g_fact(freq)
+    g_factor = spectra_utils.get_g_fact(freq) / spectra_utils.get_g_fact(freq_pivot_dust)
 
     # Apply spatially varying SED scaling in real space.
     sed_map = spectra_utils.get_sed_dust(freq, beta_dust, temp_dust, freq_pivot_dust)
-    scaled_dust_map = dust_map * np.sqrt(np.abs(A_d_BB) * sed_map) * g_factor * np.sign(A_d_BB)
+    scaled_dust_map = dust_map * np.sqrt(sed_map) * g_factor
 
     # Apply beam.
     dust_alm = np.zeros(cmb_alm.shape, dtype=np.complex128)
@@ -698,6 +695,7 @@ def apply_obsmatrix(imap, obs_matrix):
     omap : (nsplit, nfreq, npol, npix) array
         Filtered output maps.
     '''
+    
     reobs_imap = np.empty_like(imap)
     nsplit = imap.shape[0]
     nfreq = imap.shape[1]

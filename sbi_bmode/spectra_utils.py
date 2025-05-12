@@ -60,7 +60,7 @@ def get_planck_law(freq, temp):
 
 def get_g_fact(freq, temp=cmb_temp):
     '''
-    Compute the conversion factor between antenna and CMB temperature.
+    Compute the conversion factor between RJ and CMB temperature.
     See Eq 14 in Choi et al. (2007.07289).
     
     Parameters
@@ -73,7 +73,7 @@ def get_g_fact(freq, temp=cmb_temp):
     Returns
     -------
     g_fact : (nfreq) array
-    
+        Conversion from RJ to CMB.
     '''
 
     xx = hk_ratio * (freq / temp)
@@ -148,10 +148,11 @@ def get_sed_dust(freq, beta, temp, freq_pivot):
     freq : float
         Effective freq of passband in Hz.    
     beta : float
-        
+        Frequency power law index.
     temp : float
-
+        Dust temperature.
     freq_pivot : float
+        Pivot frequency in Hz.
 
     Returns
     -------
@@ -187,7 +188,7 @@ def get_ell_shape(lmax, alpha, ell_pivot=80):
     ells = jnp.arange(2, lmax + 1)
     dells = ells * (ells + 1) / 2 / np.pi
 
-    out = out.at[2:].set((ells / ell_pivot) ** (alpha + 2) / dells)
+    out = out.at[2:].set((ells / ell_pivot) ** (alpha) / dells)
 
     return out
 
@@ -245,13 +246,13 @@ def get_dust_spectra(amp, alpha, lmax, freqs, beta, temp, freq_pivot):
     lmax : int
         Maximum multipole.
     freqs : (nfreq) array
-        Effective frequencies of bands.
+        Effective frequencies of bands in Hz.
     beta : float
         Dust frequency spectral index.
     temp : float
         Dust temperature.
     freq_pivot : float
-        Frequency pivot scale.
+        Frequency pivot scale in Hz.
     
     Returns
     -------
@@ -263,6 +264,8 @@ def get_dust_spectra(amp, alpha, lmax, freqs, beta, temp, freq_pivot):
     
     out = jnp.zeros((nfreq, nfreq, lmax+1))
     out = out.at[:].set(get_ell_shape(lmax, alpha)[jnp.newaxis,:])
+
+    g0_factor =  get_g_fact(freq_pivot)
     
     for fidx1 in range(nfreq):
         
@@ -275,7 +278,7 @@ def get_dust_spectra(amp, alpha, lmax, freqs, beta, temp, freq_pivot):
             g2_factor = get_g_fact(freqs[fidx2])
 
             out = out.at[fidx1,fidx2].multiply(amp * jnp.sqrt(f1_factor * f2_factor) \
-                * g1_factor * g2_factor)
+                                               * g1_factor * g2_factor / (g0_factor ** 2))
             
     return out
 

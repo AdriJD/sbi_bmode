@@ -18,7 +18,7 @@ def parse_config(config):
     Returns
     -------
     data_dict : dict
-        Dictionary with data generations parameters.
+        Dictionary with data generation parameters.
     fixed_params_dict : dict
         Dictionary with parameters that we keep fixed.
     params_dict : dict
