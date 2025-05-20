@@ -169,11 +169,11 @@ def simulate_for_sbi_mpi(simulator, proposal, param_names, num_sims, ndata, seed
 
     return thetas_full, sims_full
 
-def main(odir, config, specdir, r_true, seed, n_train, n_samples, n_rounds, pyilcdir, use_dust_map,
+def main(odir, config, specdir, seed, n_train, n_samples, n_rounds, pyilcdir, use_dust_map,
          use_dbeta_map, deproj_dust, deproj_dbeta, fiducial_beta, fiducial_T_dust,
          no_norm=False, score_compress=False, embed=False, embed_num_layers=2,
          embed_num_hiddens=25, fmpe=False, e_moped=False, n_moped=None, density_estimator_type='maf',
-         coadd_equiv_crosses=True, apply_highpass_filter=True):
+         coadd_equiv_crosses=True, apply_highpass_filter=True, n_test=None):
     '''
     Run SBI.
 
@@ -185,8 +185,6 @@ def main(odir, config, specdir, r_true, seed, n_train, n_samples, n_rounds, pyil
         Dictionary with "data", "fixed_params" and "params" keys.
     specdir : str
         Path to data directory containing power spectrum files.
-    r_true : float
-        Assumed true r parameter used to draw data.
     seed : int
         Global seed from which all RNGs are seeded.
     n_train : int
@@ -241,6 +239,8 @@ def main(odir, config, specdir, r_true, seed, n_train, n_samples, n_rounds, pyil
         Whether to use the mean of e.g. comp1 x comp2 and comp2 x comp1 spectra.
     apply_highpass_filter: bool, optional
         Filter out signal modes below lmin in the simulations.
+    n_test : int, optional
+        Number of additional simulations written to disk for later testing.
     '''
 
     if score_compress and e_moped:
@@ -279,8 +279,6 @@ def main(odir, config, specdir, r_true, seed, n_train, n_samples, n_rounds, pyil
     elif pyilcdir and not no_norm:
         norm_simple = True
 
-    if r_true is not None:
-        params_dict['r_tensor']['true_value'] = r_true
     true_params = script_utils.get_true_params(params_dict)
 
     if score_compress:
@@ -417,6 +415,16 @@ def main(odir, config, specdir, r_true, seed, n_train, n_samples, n_rounds, pyil
 
         proposal = comm.bcast(proposal, root=0)
 
+    if n_test is not None:
+        # We are using the proposal from the latest round for the test set.
+        theta_test, x_test = simulate_for_sbi_mpi(
+            cmb_simulator, proposal, param_names, n_test, data_size,
+            rng_sims, comm, score_compress, mat_compress=mat_compress)
+
+        if comm.rank == 0:
+            if norm_simple:
+                x_test = normalize_simple(x_test, torch.as_tensor(data_mean), torch.as_tensor(data_std))
+        
     if comm.rank == 0:
         with open(opj(odir, 'posterior.pkl'), "wb") as handle:
             pickle.dump(posterior, handle)
@@ -427,14 +435,20 @@ def main(odir, config, specdir, r_true, seed, n_train, n_samples, n_rounds, pyil
             np.save(opj(odir, 'data.npy'), cmb_simulator.get_unnorm_data(x_obs))
         elif norm_simple:
             np.save(opj(odir, 'data_norm.npy'), x_obs)
-            np.save(opj(odir, 'data.npy'), unnormalize_simple(x_obs, data_mean, data_std))
+            np.save(opj(odir, 'data.npy'), unnormalize_simple(x_obs, data_mean, data_std))            
+            np.save(opj(odir, 'data_mean.npy'), data_mean)
+            np.save(opj(odir, 'data_std.npy'), data_std)            
         else:
             np.save(opj(odir, 'data.npy'), x_obs_full)
         with open(opj(odir, 'config.yaml'), "w") as handle:
             yaml.safe_dump(config, handle, sort_keys=False)
         np.save(opj(odir, 'training_loss.npy'), np.asarray(inference.summary['training_loss']))
         np.save(opj(odir, 'validation_loss.npy'), np.asarray(inference.summary['validation_loss']))
-            
+
+        if n_test is not None:
+            np.save(opj(odir, 'param_draws_test.npy'), np.asarray(theta_test))
+            np.save(opj(odir, 'data_draws_test.npy'), np.asarray(x_test))
+        
     comm.Barrier()
 
 if __name__ == '__main__':
@@ -461,13 +475,13 @@ if __name__ == '__main__':
     parser.add_argument('--no-dust-map', action='store_true', help="Whether to build map of \
                         dust. Only relevant if usng NILC PS.")
 
-    parser.add_argument('--r_true', type=float, default=None, help="True value of r.")
     parser.add_argument('--seed', type=int, default=0,
                         help="Random seed for the training data.")
     parser.add_argument('--n_train', type=int, default=1000, help="training samples for SNPE")
     parser.add_argument('--n_samples', type=int, default=10000, help="samples of posterior")
     parser.add_argument('--n_rounds', type=int, default=1, help="number of sequential rounds")
-
+    parser.add_argument('--n_test', type=int, help='Number of additional data draws written to disk.')
+    
     parser.add_argument('--score-compress', action='store_true',
                         help="Compress data vector with score compression")
     parser.add_argument('--no-norm', action='store_true', help="Do not normalize the data vector")
@@ -503,7 +517,7 @@ if __name__ == '__main__':
         config = None
     config = comm.bcast(config, root=0)
 
-    main(odir, config, args.specdir, args.r_true, args.seed, args.n_train,
+    main(odir, config, args.specdir, args.seed, args.n_train,
          args.n_samples, args.n_rounds, args.pyilcdir, not args.no_dust_map, args.use_dbeta_map,
          args.deproj_dust, args.deproj_dbeta, args.fiducial_beta, args.fiducial_T_dust,
          no_norm=args.no_norm, score_compress=args.score_compress, embed=args.embed,
@@ -511,4 +525,4 @@ if __name__ == '__main__':
          fmpe=args.fmpe, e_moped=args.e_moped, n_moped=args.n_moped,
          density_estimator_type=args.density_estimator_type,
          coadd_equiv_crosses=not args.no_coadd_equiv_crosses,
-         apply_highpass_filter=not args.no_highpass_filter)
+         apply_highpass_filter=not args.no_highpass_filter, n_test=args.n_test)
