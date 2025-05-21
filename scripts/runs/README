@@ -70,6 +70,7 @@ run35e	like run35 but cmb + dust + dbeta
 run35f	like run35 but cmb + dust + dbeta + deproj dust
 
 run36	like run35 but with test set, Alens=0.4 and higher lmax (config14)
+run37	like run36 but 2x the sims
 
 mcmc33  
 
