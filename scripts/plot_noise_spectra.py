@@ -7,8 +7,8 @@ from sbi_bmode import spectra_utils, so_utils
 
 opj = os.path.join
 
-datadir = '/mnt/home/aduivenvoorden/local/cca_project/data'
-imgdir = '/mnt/home/aduivenvoorden/project/so/20240402_sbi'
+datadir = '/u/adriaand//local/cca_project/data'
+imgdir = '/u/adriaand/project/so/20240402_sbi'
 
 os.makedirs(imgdir, exist_ok=True)
 
@@ -29,8 +29,10 @@ ax.plot(ells, dells * cov_ell_nobb[1,1], color='black', label='lensing')
 
 for fidx, fstr in enumerate(freq_strings):
 
+    ax.plot(ells, dells * so_utils.get_sat_noise_old(
+        fstr, sensitivity_mode, lknee_mode, fsky, lmax), label=fstr, color=f'C{fidx}')
     ax.plot(ells, dells * so_utils.get_sat_noise(
-        fstr, sensitivity_mode, lknee_mode, fsky, lmax), label=fstr)
+        fstr, sensitivity_mode, lknee_mode, lmax), ls='dashed', color=f'C{fidx}')
 
 ax.grid(True)
 ax.set_yscale('log')

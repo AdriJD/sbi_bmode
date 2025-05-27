@@ -121,13 +121,12 @@ class CMBSimulator():
         self.sensitivity_mode = data_dict['sensitivity_mode']
         self.lknee_mode = data_dict['lknee_mode']
         self.noise_cov_ell = np.ones((self.nfreq, 2, 2, self.lmax + 1))
-        self.fsky = data_dict['fsky']
 
         for fidx, fstr in enumerate(self.freq_strings):
 
             # We scale the noise with the number of splits.
             self.noise_cov_ell[fidx] = np.eye(2)[:,:,np.newaxis] * so_utils.get_sat_noise(
-                fstr, self.sensitivity_mode, self.lknee_mode, self.fsky, self.lmax) \
+                fstr, self.sensitivity_mode, self.lknee_mode, self.lmax) \
                 * self.nsplit
 
         # Fixed parameters.
