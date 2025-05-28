@@ -8,7 +8,7 @@ planck_beam_fwhms = {'p30' : 32.29, 'p44' : 27.94, 'p70' : 13.08, 'p100' : 9.66,
 
 # In Hz.
 planck_central_freqs = {'p30' : 28.4e9, 'p44' : 44.1e9, 'p70' : 70.4e9, 'p100' : 100e9, 'p143' : 143e9,
-                        'p217' : 217e9, 'p353' : 353e9}
+                        'p217' : 217e9, 'p353' : 340e9} # NOTE, 340 instead of 353 to avoid divide by 0 in pyilc.
 
 # Polarization sensitivity in uK degree.
 planck_noise_level = {'p30' : 3.5, 'p44' : 4.0, 'p70' : 5.0, 'p100' : 1.96, 'p143' : 1.17,

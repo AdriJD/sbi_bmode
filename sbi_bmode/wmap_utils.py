@@ -2,17 +2,17 @@ import numpy as np
 
 # From https://lambda.gsfc.nasa.gov/product/wmap/dr5/index.html.
 # In arcmin.
-wmap_beam_fwhms = {'K' : 52.8, 'Ka' : 39.6, 'Q' : 30.6, 'V' : 21., 'W' : 13.2}
+wmap_beam_fwhms = {'wK' : 52.8, 'wKa' : 39.6, 'wQ' : 30.6, 'wV' : 21., 'wW' : 13.2}
 
 # In Hz.
-wmap_central_freqs = {'K' : 23.e9, 'Ka' : 33.e9, 'Q' : 41.e9, 'V' : 61.e9, 'W' : 94.e9}
+wmap_central_freqs = {'wK' : 23.e9, 'wKa' : 33.e9, 'wQ' : 41.e9, 'wV' : 61.e9, 'wW' : 94.e9}
 
 # Polarization sensitivity in uK arcmin. Taken from mean noise power spectrum in 30 < ell < 300.
-wmap_noise_level = {'K' : 290.6, 'Ka' : 294.8, 'Q' : 281.2, 'V' : 337.4, 'W' : 407.3}
+wmap_noise_level = {'wK' : 290.6, 'wKa' : 294.8, 'wQ' : 281.2, 'wV' : 337.4, 'wW' : 407.3}
 
 def get_wmap_noise(fstr, lmax):
     '''
-    Generate white noise curves in polarization for the planck satellite.
+    Generate white noise curves in polarization for the WMAP satellite.
 
     Parameters
     ----------
@@ -28,6 +28,6 @@ def get_wmap_noise(fstr, lmax):
     '''
 
     n_ell = np.ones(lmax + 1)
-    n_ell *= np.radians(planck_noise_level[fstr] / 60) ** 2
+    n_ell *= np.radians(wmap_noise_level[fstr] / 60) ** 2
 
     return n_ell    

@@ -12,7 +12,8 @@ import healpy as hp
 from jax import grad
 import jax.numpy as jnp
 
-from sbi_bmode import spectra_utils, so_utils, nilc_utils, likelihood_utils
+from sbi_bmode import (spectra_utils, so_utils, nilc_utils, likelihood_utils,
+                       planck_utils, wmap_utils)
 
 opj = os.path.join
 
@@ -90,12 +91,17 @@ class CMBSimulator():
         self.minfo = map_utils.MapInfo.map_info_healpix(self.nside)
         self.ainfo = curvedsky.alm_info(self.lmax)
 
-        self.freq_strings = data_dict['freq_strings']
-        self.freqs = [so_utils.sat_central_freqs[fstr] for fstr in self.freq_strings]
+        freq_strings = data_dict['freq_strings']
+
+        beam_fwhms = [self.get_beam_fwhms(fstr) for fstr in freq_strings]
+        # We re-order the freq_strings based on FWHM because pyilc requires that.
+        freq_strings_ordered = np.asarray(freq_strings)[np.argsort(np.asarray(beam_fwhms))][::-1]
+        self.freq_strings = [str(fstr) for fstr in freq_strings_ordered]
+        self.beam_fwhms = [self.get_beam_fwhms(fstr) for fstr in self.freq_strings]
+        self.freqs = [self.get_freqs(fstr) for fstr in self.freq_strings]        
         assert np.all(np.asarray(self.freqs) > 1e9), 'Frequencies have to be in Ghz.'
         self.nfreq = len(self.freqs)
-
-        self.beam_fwhms = [so_utils.sat_beam_fwhms[fstr] for fstr in self.freq_strings]
+        
         self.b_ells = self.get_gaussian_beams(self.beam_fwhms, self.lmax)
         if apply_highpass_filter:
             self.highpass_filter = get_highpass_filter(
@@ -125,8 +131,7 @@ class CMBSimulator():
         for fidx, fstr in enumerate(self.freq_strings):
 
             # We scale the noise with the number of splits.
-            self.noise_cov_ell[fidx] = np.eye(2)[:,:,np.newaxis] * so_utils.get_sat_noise(
-                fstr, self.sensitivity_mode, self.lknee_mode, self.lmax) \
+            self.noise_cov_ell[fidx] = np.eye(2)[:,:,np.newaxis] * self.get_noise_ps(fstr) \
                 * self.nsplit
 
         # Fixed parameters.
@@ -178,6 +183,81 @@ class CMBSimulator():
             self.grad_logdens = grad(get_loglike, argnums=0)
             self.score_compress = lambda x: self.grad_logdens(score_params_arr, x)
 
+    def get_noise_ps(self, fstr):
+        '''
+        Return the BB noise power spectrum for a given band.
+
+        Parameters
+        ----------
+        fstr : str
+            Frequency band identifier.
+
+        Return
+        ------
+        n_ell : (nell) array
+            BB noise power spectrum.
+        '''
+
+        if fstr.startswith('f'):            
+            return so_utils.get_sat_noise(
+                fstr, self.sensitivity_mode, self.lknee_mode, self.lmax)
+        if fstr.startswith('p'):
+            return planck_utils.get_planck_noise(fstr, self.lmax)
+        if fstr.startswith('w'):
+            return wmap_utils.get_wmap_noise(fstr, self.lmax)        
+        else:
+            raise ValueError(f'{fstr=} not recognized')
+            
+    @staticmethod
+    def get_freqs(fstr):
+        '''
+        Return central frequency.
+
+        Parameters
+        ----------
+        fstr : str
+            Frequency band identifier.
+
+        Return
+        ------
+        central_freq : float
+            Central frequency in Hz.
+        '''
+
+        if fstr.startswith('f'):
+            return so_utils.sat_central_freqs[fstr]
+        elif fstr.startswith('p'):
+            return planck_utils.planck_central_freqs[fstr]
+        elif fstr.startswith('w'):
+            return wmap_utils.wmap_central_freqs[fstr]
+        else:
+            raise ValueError(f'{fstr=} not recognized')
+
+    @staticmethod
+    def get_beam_fwhms(fstr):
+        '''
+        Return beam FWHM.
+
+        Parameters
+        ----------
+        fstr : str
+            Frequency band identifier.
+
+        Return
+        ------
+        fwhm : float
+            FWHM in arcmin.
+        '''
+
+        if fstr.startswith('f'):
+            return so_utils.sat_beam_fwhms[fstr]
+        elif fstr.startswith('p'):
+            return planck_utils.planck_beam_fwhms[fstr]
+        elif fstr.startswith('w'):
+            return wmap_utils.wmap_beam_fwhms[fstr]
+        else:
+            raise ValueError(f'{fstr=} not recognized')
+        
     def get_signal_spectra(self, r_tensor, A_lens, A_d_BB, alpha_d_BB, beta_dust):
         '''
         Generate binned signal frequency cross spectra.

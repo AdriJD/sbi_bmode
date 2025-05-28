@@ -6,3 +6,4 @@ config11	Similar to 09 but slighly broader priors, and slighly perturbed true va
 config12	Same as 11 but including gamma_beta_dust
 config13	more realistic gamma_beta_dust priors and true values
 config14	like 13 but Alens=0.4 and higher lmax
+config15	like 14 but with WMAP K and Planck 353.
