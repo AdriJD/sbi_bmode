@@ -23,7 +23,7 @@ class CMBSimulator():
 
     Parameters
     ----------
-    specdir: str
+    specdir : str
         Path to data directory containing power spectrum files.
     data_dict : dict
         Dictionary with data generation parameters.
@@ -47,6 +47,12 @@ class CMBSimulator():
         deproject first moment of dust w.r.t. beta in CMB NILC map.
     fiducial_beta: float, optional
         Use this value for beta when building nilc maps.
+    deproj_cmb : Bool, optional
+        Whether to deproject CMB from the dust and dbeta maps.
+    deproj_dbeta_from_dust : Bool, optional
+        Whether to deproject dbeta from dust map.
+    deproj_dust_from_dbeta : Bool, optional
+        Whether to deproject dust from dbeta map.
     fiducial_T_dust: float, optional
         Use this value for T_dust when building nilc maps.
     odir: str
@@ -63,7 +69,8 @@ class CMBSimulator():
     '''
 
     def __init__(self, specdir, data_dict, fixed_params_dict, pyilcdir=None, use_dust_map=True,
-                 use_dbeta_map=False, deproj_dust=False, deproj_dbeta=False, fiducial_beta=None,
+                 use_dbeta_map=False, deproj_dust=False, deproj_dbeta=False, deproj_cmb=False,
+                 deproj_dbeta_from_dust=False, deproj_dust_from_dbeta=False, fiducial_beta=None,
                  fiducial_T_dust=None, odir=None, norm_params=None, score_params=None,
                  coadd_equiv_crosses=True, apply_highpass_filter=True):
 
@@ -77,6 +84,9 @@ class CMBSimulator():
         self.use_dbeta_map = use_dbeta_map
         self.deproj_dust = deproj_dust
         self.deproj_dbeta = deproj_dbeta
+        self.deproj_cmb = deproj_cmb
+        self.deproj_dbeta_from_dust = deproj_dbeta_from_dust
+        self.deproj_dust_from_dbeta = deproj_dust_from_dbeta
         self.fiducial_beta = fiducial_beta
         self.fiducial_T_dust = fiducial_T_dust
         self.odir = odir
@@ -366,7 +376,9 @@ class CMBSimulator():
                 self.pyilcdir, map_tmpdir, self.nsplit, self.nside, self.fiducial_beta,
                 self.fiducial_T_dust, self.freq_pivot_dust, self.freqs,
                 self.beam_fwhms, use_dust_map=self.use_dust_map, use_dbeta_map=self.use_dbeta_map,
-                deproj_dust=self.deproj_dust, deproj_dbeta=self.deproj_dbeta, output_dir=self.odir,
+                deproj_dust=self.deproj_dust, deproj_dbeta=self.deproj_dbeta,
+                deproj_cmb=self.deproj_cmb, deproj_dbeta_from_dust=self.deproj_dbeta_from_dust,
+                deproj_dust_from_dbeta=self.deproj_dust_from_dbeta, output_dir=self.odir,
                 remove_files=True, debug=False)
             spectra = estimate_spectra_nilc(nilc_maps, self.minfo, self.ainfo)
 

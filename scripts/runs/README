@@ -73,6 +73,7 @@ run36	like run35 but with test set, Alens=0.4 and higher lmax (config14)
 run37	like run36 but 2x the sims
 
 run38	like run36 but with added Planck and WMAP
+run39	like run36 but with deproj_cmb and deproj dbeta from dust and vice versa.
 
 mcmc33  
 
