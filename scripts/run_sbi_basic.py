@@ -170,8 +170,7 @@ def simulate_for_sbi_mpi(simulator, proposal, param_names, num_sims, ndata, seed
     return thetas_full, sims_full
 
 def main(odir, config, specdir, seed, n_train, n_samples, n_rounds, pyilcdir, use_dust_map,
-         use_dbeta_map, deproj_dust, deproj_dbeta, deproj_cmb, deproj_dbeta_from_dust,
-         deproj_dust_from_dbeta, fiducial_beta, fiducial_T_dust,
+         use_dbeta_map, deproj_dust, deproj_dbeta, fiducial_beta, fiducial_T_dust,
          no_norm=False, score_compress=False, embed=False, embed_num_layers=2,
          embed_num_hiddens=25, embed_num_output_fact=3, fmpe=False, e_moped=False, n_moped=None,
          density_estimator_type='maf', coadd_equiv_crosses=True, apply_highpass_filter=True, n_test=None):
@@ -210,12 +209,6 @@ def main(odir, config, specdir, seed, n_train, n_samples, n_rounds, pyilcdir, us
     deproj_dbeta: bool
         Only relevant if using nilc (pyilc dir is not None). Whether to
         deproject first moment of dust w.r.t. beta in CMB NILC map.
-    deproj_cmb : Bool, optional
-        Whether to deproject CMB from the dust and dbeta maps.
-    deproj_dbeta_from_dust : Bool, optional
-        Whether to deproject dbeta from dust map.
-    deproj_dust_from_dbeta : Bool, optional
-        Whether to deproject dust from dbeta map.
     fiducial_beta: float, optional
         Only relevant if using nilc (pyilc dir is not None). If not None,
         use this value for beta when building nilc maps. Otherwise, use a separate value
@@ -477,12 +470,6 @@ if __name__ == '__main__':
                        in CMB NILC map. Only relevant if usng NILC PS.")
     parser.add_argument('--deproj_dbeta', action='store_true', help="Whether to deproject first  \
                     moment of dust w.r.t. beta in CMB NILC map. Only relevant if usng NILC PS.")
-    parser.add_argument('--deproj_cmb', action='store_true', help="Whether to deproject CMB  \
-                    in dust and dbeta NILC map(s). Only relevant if usng NILC PS.")
-    parser.add_argument('--deproj_dbeta_from_dust', action='store_true', help="Whether to deproject  \
-                        dust from dbeta NILC map(s). Only relevant if usng NILC PS.")
-    parser.add_argument('--deproj_dust_from_dbeta', action='store_true', help="Whether to deproject  \
-                        dbeta from dust NILC map(s). Only relevant if usng NILC PS.")    
     parser.add_argument('--fiducial_beta', type=float, default=None, help="If not None,  \
                 use this fiducial beta value to build NILC maps. If None, use the beta of \
                 each simulation rather than some fiducial value. Only relevant if using NILC PS.")
@@ -538,8 +525,7 @@ if __name__ == '__main__':
 
     main(odir, config, args.specdir, args.seed, args.n_train,
          args.n_samples, args.n_rounds, args.pyilcdir, not args.no_dust_map, args.use_dbeta_map,
-         args.deproj_dust, args.deproj_dbeta, args.deproj_cmb, args.deproj_dbeta_from_dust,
-         args.deproj_dust_from_dbeta, args.fiducial_beta, args.fiducial_T_dust,
+         args.deproj_dust, args.deproj_dbeta, args.fiducial_beta, args.fiducial_T_dust,
          no_norm=args.no_norm, score_compress=args.score_compress, embed=args.embed,
          embed_num_layers=args.embed_num_layers, embed_num_hiddens=args.embed_num_hiddens,
          embed_num_output_fact=args.embed_num_output_fact, fmpe=args.fmpe, e_moped=args.e_moped, n_moped=args.n_moped,

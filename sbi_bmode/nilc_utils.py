@@ -37,8 +37,7 @@ def write_maps(B_maps, output_dir=None):
 
 def get_nilc_maps(pyilc_path, map_tmpdir, nsplit, nside, fiducial_beta, fiducial_T_dust, freq_pivot_dust, 
                   central_freqs, beam_fwhms, use_dust_map=True, use_dbeta_map=False, 
-                  deproj_dust=False, deproj_dbeta=False, deproj_cmb=False, deproj_dbeta_from_dust=False,
-                  deproj_dust_from_dbeta=False, output_dir=None, remove_files=True, debug=False):
+                  deproj_dust=False, deproj_dbeta=False, output_dir=None, remove_files=True, debug=False):
     '''
     Run pyilc and return NILC map(s).
 
@@ -70,12 +69,6 @@ def get_nilc_maps(pyilc_path, map_tmpdir, nsplit, nside, fiducial_beta, fiducial
         Whether to deproject dust in CMB NILC map.
     deproj_dbeta : Bool, optional
         Whether to deproject first moment of dust w.r.t. beta in CMB NILC map.
-    deproj_cmb : Bool, optional
-        Whether to deproject CMB from the dust and dbeta maps.
-    deproj_dbeta_from_dust : Bool, optional
-        Whether to deproject dbeta from dust map.
-    deproj_dust_from_dbeta : Bool, optional
-        Whether to deproject dust from dbeta map.
     output_dir : str, optional
         Directory in which to make temporary directory for NILC maps (if set to None,
         the default $TMPDIR will be used).
@@ -146,15 +139,16 @@ def get_nilc_maps(pyilc_path, map_tmpdir, nsplit, nside, fiducial_beta, fiducial
         # CMB-specific and dust-specific dictionaries.
         cmb_param_dict = {'ILC_preserved_comp': 'CMB'}
         cmb_param_dict.update(pyilc_input_params)
-        if deproj_dust and deproj_dbeta:
+
+        if (deproj_dust or use_dust_map) and (deproj_dbeta or use_dbeta_map):
             cmb_param_dict['ILC_deproj_comps'] = ['CIB','CIB_dbeta']
             cmb_param_dict['N_deproj'] = 2
             cmb_oname = 'needletILCmap_component_CMB_deproject_CIB_CIB_dbeta'
-        elif deproj_dust:
+        elif (deproj_dust or use_dust_map):
             cmb_param_dict['ILC_deproj_comps'] = ['CIB']
             cmb_param_dict['N_deproj'] = 1
             cmb_oname = 'needletILCmap_component_CMB_deproject_CIB'            
-        elif deproj_dbeta:
+        elif (deproj_dbeta or use_dbeta_map):
             raise ValueError("Cannot deproject dbeta without deprojecting dust")
         else:
             cmb_oname = 'needletILCmap_component_CMB'
@@ -164,23 +158,19 @@ def get_nilc_maps(pyilc_path, map_tmpdir, nsplit, nside, fiducial_beta, fiducial
         if use_dust_map:
             dust_param_dict = {'ILC_preserved_comp': 'CIB'} 
             dust_param_dict.update(pyilc_input_params)
-            if deproj_cmb and deproj_dbeta_from_dust:
+            if (deproj_dbeta or use_dbeta_map):
                 dust_param_dict['ILC_deproj_comps'] = ['CMB', 'CIB_dbeta']
-            elif deproj_cmb:
+            else:
                 dust_param_dict['ILC_deproj_comps'] = ['CMB']
-            elif deproj_dbeta_from_dust:
-                dust_param_dict['ILC_deproj_comps'] = ['CIB_dbeta']
             all_param_dicts.append(dust_param_dict)
             comps.append('dust')
         if use_dbeta_map:
             dbeta_param_dict = {'ILC_preserved_comp': 'CIB_dbeta'}
             dbeta_param_dict.update(pyilc_input_params)
-            if deproj_cmb and deproj_dust_from_dbeta:
+            if (deproj_dust or use_dust_map)
                 dbeta_param_dict['ILC_deproj_comps'] = ['CMB', 'CIB']
-            elif deproj_cmb:
+            else:
                 dbeta_param_dict['ILC_deproj_comps'] = ['CMB']
-            elif deproj_dbeta_from_dust:
-                dbeta_param_dict['ILC_deproj_comps'] = ['CIB']            
             all_param_dicts.append(dbeta_param_dict)
             comps.append('dbeta')
 
