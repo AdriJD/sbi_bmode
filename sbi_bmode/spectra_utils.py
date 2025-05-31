@@ -140,8 +140,8 @@ def get_combined_cmb_spectrum(r_tensor, A_lens, cov_scalar_ell, cov_tensor_ell):
 
 def get_sed_dust(freq, beta, temp, freq_pivot):
     '''
-    Compute the SED of the Planck modified blackbody dust model in antenna temp,
-    see Eq. 15 in Choi et al.
+    Compute the SED of the Planck modified blackbody dust model in RJ temp,
+    see Eq. 15 in Choi et al. This is the square of what to apply to a map!
     
     Parameters
     ----------
@@ -157,13 +157,36 @@ def get_sed_dust(freq, beta, temp, freq_pivot):
     Returns
     -------
     out : float
-        SED evaluated at input freq.
+        SED^2 evaluated at input freq.
     '''
 
     b_freq = get_planck_law(freq, temp)
     b_pivot = get_planck_law(freq_pivot, temp)
     
     return ((freq / freq_pivot) ** (beta - 2) * b_freq / b_pivot) ** 2
+
+def get_sed_sync(freq, beta, freq_pivot):
+    '''
+    The frequency dependent part of Eq. 16 in Choi et al.,
+    without the g1 and a_sync factors. This is in RJ temperature units and
+    this is the square of what to apply to a map.
+    
+    Parameters
+    ----------
+    freq : float
+        Effective freq of passband in Hz.    
+    beta : float
+        Frequency power law index.
+    freq_pivot : float
+        Pivot frequency in Hz.
+
+    Returns
+    -------
+    out : float
+        SED^2 evaluated at input freq.
+    '''
+
+    return (freq / freq_pivot) ** (2 * beta)
 
 def get_ell_shape(lmax, alpha, ell_pivot=80):
     '''
@@ -298,22 +321,6 @@ def apply_beam_to_freq_cov(cov_ell, beams):
     beam_mat = jnp.eye(nfreq)[:,:,jnp.newaxis] * beams
 
     return jnp.einsum('abl, bcl, cdl -> adl', beam_mat, cov_ell, beam_mat)
-    
-def get_sed_sync(freq, beta, freq_pivot):
-    '''
-    The frequency dependent part of Eq. 16 in Choi et al.,
-    without the g1 and a_sync factors.
-    
-    Parameters
-    ----------
-    freq : float
-
-    beta : float
-
-    freq_pivot : float
-    '''
-
-    return (freq / freq_pivot) ** (2 * beta)
 
 def get_sync_spectra(amp, alpha, lmax, freq, beta, freq_pivot):
     '''

@@ -173,8 +173,8 @@ def main(odir, config, specdir, seed, n_train, n_samples, n_rounds, pyilcdir, us
          use_dbeta_map, deproj_dust, deproj_dbeta, deproj_cmb, deproj_dbeta_from_dust,
          deproj_dust_from_dbeta, fiducial_beta, fiducial_T_dust,
          no_norm=False, score_compress=False, embed=False, embed_num_layers=2,
-         embed_num_hiddens=25, fmpe=False, e_moped=False, n_moped=None, density_estimator_type='maf',
-         coadd_equiv_crosses=True, apply_highpass_filter=True, n_test=None):
+         embed_num_hiddens=25, embed_num_output_fact=3, fmpe=False, e_moped=False, n_moped=None,
+         density_estimator_type='maf', coadd_equiv_crosses=True, apply_highpass_filter=True, n_test=None):
     '''
     Run SBI.
 
@@ -234,6 +234,8 @@ def main(odir, config, specdir, seed, n_train, n_samples, n_rounds, pyilcdir, us
         Number of layers of embedding network
     embed_num_hiddens : int, optional
         Number of features in each hidden layer.
+    embed_num_output_fact : float, optional
+        Number of output nodes for embedding network: int(embed_num_output_fact * nparam).
     fmpe : bool, optional
         Use Flow-Matching Posterior Estimation.
     e_moped : bool, optional
@@ -281,9 +283,11 @@ def main(odir, config, specdir, seed, n_train, n_samples, n_rounds, pyilcdir, us
 
     norm_params = None
     norm_simple = False
-    if not pyilcdir and not no_norm:
-        norm_params = mean_dict
-    elif pyilcdir and not no_norm:
+    #if not pyilcdir and not no_norm:
+    #    norm_params = mean_dict
+    #elif pyilcdir and not no_norm:
+    #    norm_simple = True
+    if not no_norm:
         norm_simple = True
 
     true_params = script_utils.get_true_params(params_dict)
@@ -371,7 +375,7 @@ def main(odir, config, specdir, seed, n_train, n_samples, n_rounds, pyilcdir, us
     if embed:
         embedding_net = FCEmbedding(
            input_dim=x_obs.size,
-           output_dim=num_parameters,
+           output_dim=int(embed_num_output_fact * num_parameters),
            num_layers=embed_num_layers,
            num_hiddens=embed_num_hiddens)
         neural_posterior = posterior_nn(model=density_estimator_type,
@@ -504,6 +508,8 @@ if __name__ == '__main__':
                         help="Number of layers in embedding nework")
     parser.add_argument('--embed-num-hiddens', type=int, default=25,
                         help="Number of hidden units in each layer of the embedding network")
+    parser.add_argument('--embed-num-output-fact', type=int, default=3,
+                        help="Number of output nodes for embedding network: int(embed_num_output_fact * nparam).")
     parser.add_argument('--fmpe', action='store_true', help="Use Flow-Matching Posterior Estimation.")
     parser.add_argument('--e-moped', action='store_true', help="Use e-MOPED to compress the data vector")
     parser.add_argument('--n-moped', type=int, help="Number of sims used to estimate e-moped matrix",
@@ -536,7 +542,7 @@ if __name__ == '__main__':
          args.deproj_dust_from_dbeta, args.fiducial_beta, args.fiducial_T_dust,
          no_norm=args.no_norm, score_compress=args.score_compress, embed=args.embed,
          embed_num_layers=args.embed_num_layers, embed_num_hiddens=args.embed_num_hiddens,
-         fmpe=args.fmpe, e_moped=args.e_moped, n_moped=args.n_moped,
+         embed_num_output_fact=args.embed_num_output_fact, fmpe=args.fmpe, e_moped=args.e_moped, n_moped=args.n_moped,
          density_estimator_type=args.density_estimator_type,
          coadd_equiv_crosses=not args.no_coadd_equiv_crosses,
          apply_highpass_filter=not args.no_highpass_filter, n_test=args.n_test)

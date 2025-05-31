@@ -74,6 +74,10 @@ run37	like run36 but 2x the sims
 
 run38	like run36 but with added Planck and WMAP
 run39	like run36 but with deproj_cmb and deproj dbeta from dust and vice versa.
+run39b	like run36 but with no deprojection at all
+run40	like run36 but without nilc
+run41	like run41 but 2x sims and embedding
+run42	like run40 but with SNPE
 
 mcmc33  
 
