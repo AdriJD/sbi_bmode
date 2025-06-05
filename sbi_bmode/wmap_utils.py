@@ -5,7 +5,9 @@ import numpy as np
 wmap_beam_fwhms = {'wK' : 52.8, 'wKa' : 39.6, 'wQ' : 30.6, 'wV' : 21., 'wW' : 13.2}
 
 # In Hz.
-wmap_central_freqs = {'wK' : 23.e9, 'wKa' : 33.e9, 'wQ' : 41.e9, 'wV' : 61.e9, 'wW' : 94.e9}
+#wmap_central_freqs = {'wK' : 23.e9, 'wKa' : 33.e9, 'wQ' : 41.e9, 'wV' : 61.e9, 'wW' : 94.e9}
+# Changed K band to avoid divide by zero in pyilc.
+wmap_central_freqs = {'wK' : 25.e9, 'wKa' : 33.e9, 'wQ' : 41.e9, 'wV' : 61.e9, 'wW' : 94.e9} 
 
 # Polarization sensitivity in uK arcmin. Taken from mean noise power spectrum in 30 < ell < 300.
 wmap_noise_level = {'wK' : 290.6, 'wKa' : 294.8, 'wQ' : 281.2, 'wV' : 337.4, 'wW' : 407.3}

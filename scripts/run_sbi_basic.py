@@ -133,8 +133,14 @@ def simulate_for_sbi_mpi(simulator, proposal, param_names, num_sims, ndata, seed
             theta_dict['beta_dust'],
             seed,
             amp_beta_dust=theta_dict.get('amp_beta_dust'),
-            gamma_beta_dust=theta_dict.get('gamma_beta_dust'))
-
+            gamma_beta_dust=theta_dict.get('gamma_beta_dust'),
+            A_s_BB=theta_dict.get('A_s_BB'),
+            alpha_s_BB=theta_dict.get('alpha_s_BB'),
+            beta_sync=theta_dict.get('beta_sync'),
+            amp_beta_sync=theta_dict.get('amp_beta_sync'),
+            gamma_beta_sync=theta_dict.get('gamma_beta_sync'),
+            rho_ds=theta_dict.get('rho_ds'))
+        
         if mat_compress is not None:
             draw = np.dot(mat_compress, draw)
         if score_compress:
@@ -170,8 +176,9 @@ def simulate_for_sbi_mpi(simulator, proposal, param_names, num_sims, ndata, seed
     return thetas_full, sims_full
 
 def main(odir, config, specdir, seed, n_train, n_samples, n_rounds, pyilcdir, use_dust_map,
-         use_dbeta_map, deproj_dust, deproj_dbeta, fiducial_beta, fiducial_T_dust,
-         no_norm=False, score_compress=False, embed=False, embed_num_layers=2,
+         use_dbeta_map, deproj_dust, deproj_dbeta, fiducial_beta, fiducial_T_dust,         
+         use_sync_map=False, use_dbeta_sync_map=False, deproj_sync=False, deproj_dbeta_sync=False,
+         fiducial_beta_sync=None, no_norm=False, score_compress=False, embed=False, embed_num_layers=2,
          embed_num_hiddens=25, embed_num_output_fact=3, fmpe=False, e_moped=False, n_moped=None,
          density_estimator_type='maf', coadd_equiv_crosses=True, apply_highpass_filter=True, n_test=None):
     '''
@@ -217,6 +224,22 @@ def main(odir, config, specdir, seed, n_train, n_samples, n_rounds, pyilcdir, us
         Only relevant if using nilc (pyilc dir is not None). If not None,
         use this value for T_dust when building nilc maps. Otherwise, use a separate value
         for each simulation.
+    use_sync_map: bool, optional
+        Only relevant if using nilc (pyilc dir is not None). Whether
+        to build map of synchrotron and include it in auto- and cross-spectra in
+        the data vector
+    use_dbeta_sync_map: bool, optional
+        Only relevant if using nilc (pyilc dir is not None). Whether
+        to build map of first moment w.r.t. beta_synchrotron and include it in
+        auto- and cross-spectra in the data vector
+    deproj_sync: bool, optional
+        Only relevant if using nilc (pyilc dir is not None). Whether to
+        deproject synchrotron in CMB NILC map.
+    deproj_dbeta_sync: bool, optional
+        Only relevant if using nilc (pyilc dir is not None). Whether to
+        deproject first moment of synchrotron w.r.t. beta in CMB NILC map.
+    fiducial_beta_sync: float, optional
+        Use this value for beta_synchrotron when building nilc maps.
     no_norm : bool, optional
         Apply no normalization to the data vector.
     score_compress : bool, optional
@@ -293,8 +316,10 @@ def main(odir, config, specdir, seed, n_train, n_samples, n_rounds, pyilcdir, us
 
     cmb_simulator = sim_utils.CMBSimulator(
         specdir, data_dict, fixed_params_dict, pyilcdir=pyilcdir, use_dust_map=use_dust_map,
-        use_dbeta_map=use_dbeta_map, deproj_dust=deproj_dust, deproj_dbeta=deproj_dbeta,
-        fiducial_beta=fiducial_beta, fiducial_T_dust=fiducial_T_dust, odir=odir,
+        use_dbeta_map=use_dbeta_map, use_sync_map=use_sync_map, use_dbeta_sync_map=use_dbeta_sync_map,
+        deproj_dust=deproj_dust, deproj_dbeta=deproj_dbeta, deproj_sync=deproj_sync,
+        deproj_dbeta_sync=deproj_dbeta_sync, fiducial_beta=fiducial_beta,
+        fiducial_T_dust=fiducial_T_dust, fiducial_beta_sync=fiducial_beta_sync, odir=odir,
         norm_params=norm_params, score_params=score_params,
         coadd_equiv_crosses=coadd_equiv_crosses)
 
@@ -347,8 +372,13 @@ def main(odir, config, specdir, seed, n_train, n_samples, n_rounds, pyilcdir, us
             true_params['beta_dust'],
             rng_sims,
             amp_beta_dust=true_params.get('amp_beta_dust'),
-            gamma_beta_dust=true_params.get('gamma_beta_dust'))
-
+            gamma_beta_dust=true_params.get('gamma_beta_dust'),
+            A_s_BB=true_params.get('A_s_BB'),
+            alpha_s_BB=true_params.get('alpha_s_BB'),
+            beta_sync=true_params.get('beta_sync'),
+            amp_beta_sync=true_params.get('amp_beta_sync'),
+            gamma_beta_sync=true_params.get('gamma_beta_sync'),
+            rho_ds=true_params.get('rho_ds'))
     else:
         x_obs = None
     x_obs = comm.bcast(x_obs, root=0)
@@ -467,25 +497,31 @@ if __name__ == '__main__':
     parser.add_argument('--use_dbeta_map', action='store_true', help="Whether to build map of \
                         1st moment w.r.t. beta. Only relevant if usng NILC PS.")
     parser.add_argument('--deproj_dust', action='store_true', help="Whether to deproject dust \
-                       in CMB NILC map. Only relevant if usng NILC PS.")
+                        in CMB NILC map. Only relevant if usng NILC PS.")
     parser.add_argument('--deproj_dbeta', action='store_true', help="Whether to deproject first  \
-                    moment of dust w.r.t. beta in CMB NILC map. Only relevant if usng NILC PS.")
-    parser.add_argument('--fiducial_beta', type=float, default=None, help="If not None,  \
-                use this fiducial beta value to build NILC maps. If None, use the beta of \
-                each simulation rather than some fiducial value. Only relevant if using NILC PS.")
-    parser.add_argument('--fiducial_T_dust', type=float, default=None, help="If not None,  \
-            use this fiducial T_dust value to build NILC maps. If None, use the T_dust of \
-            each simulation rather than some fiducial value. Only relevant if using NILC PS.")
+                        moment of dust w.r.t. beta in CMB NILC map. Only relevant if usng NILC PS.")
+    parser.add_argument('--fiducial_beta', type=float, default=None, help="Use this fiducial beta \
+                         value to build NILC maps, required if dust/dbeta maps/deprojection are used.")
+    parser.add_argument('--fiducial_T_dust', type=float, default=None, help="Use this fiducial temperature \
+                         value to build NILC maps, required if dust/dbeta maps/deprojection are used.")
     parser.add_argument('--no-dust-map', action='store_true', help="Whether to build map of \
-                        dust. Only relevant if usng NILC PS.")
-
+                        dust. Only relevant if usng NILC PS.")    
+    parser.add_argument('--use_sync_map', action='store_true', help="Whether to build map of \
+                        synchrotron. Only relevant if usng NILC PS.")
+    parser.add_argument('--use_dbeta_sync_map', action='store_true', help="Whether to build map of \
+                        1st moment w.r.t. beta synchrotron. Only relevant if usng NILC PS.")    
+    parser.add_argument('--deproj_sync', action='store_true', help="Whether to deproject synchrotron \
+                        in CMB NILC map. Only relevant if usng NILC PS.")
+    parser.add_argument('--deproj_dbeta_sync', action='store_true', help="Whether to deproject first  \
+                        moment of dust w.r.t. synchrotron beta in CMB NILC map. Only relevant if usng NILC PS.")
+    parser.add_argument('--fiducial_beta_sync', type=float, default=None, help="Use this fiducial beta synchrotron \
+                         value to build NILC maps, required if sync/dbeta_sync maps/deprojection are used.")    
     parser.add_argument('--seed', type=int, default=0,
                         help="Random seed for the training data.")
     parser.add_argument('--n_train', type=int, default=1000, help="training samples for SNPE")
     parser.add_argument('--n_samples', type=int, default=10000, help="samples of posterior")
     parser.add_argument('--n_rounds', type=int, default=1, help="number of sequential rounds")
-    parser.add_argument('--n_test', type=int, help='Number of additional data draws written to disk.')
-    
+    parser.add_argument('--n_test', type=int, help='Number of additional data draws written to disk.')    
     parser.add_argument('--score-compress', action='store_true',
                         help="Compress data vector with score compression")
     parser.add_argument('--no-norm', action='store_true', help="Do not normalize the data vector")
@@ -526,6 +562,9 @@ if __name__ == '__main__':
     main(odir, config, args.specdir, args.seed, args.n_train,
          args.n_samples, args.n_rounds, args.pyilcdir, not args.no_dust_map, args.use_dbeta_map,
          args.deproj_dust, args.deproj_dbeta, args.fiducial_beta, args.fiducial_T_dust,
+         use_sync_map=args.use_sync_map, use_dbeta_sync_map=args.use_dbeta_sync_map,
+         deproj_sync=args.deproj_sync, deproj_dbeta_sync=args.deproj_dbeta_sync,
+         fiducial_beta_sync=args.fiducial_beta_sync,         
          no_norm=args.no_norm, score_compress=args.score_compress, embed=args.embed,
          embed_num_layers=args.embed_num_layers, embed_num_hiddens=args.embed_num_hiddens,
          embed_num_output_fact=args.embed_num_output_fact, fmpe=args.fmpe, e_moped=args.e_moped, n_moped=args.n_moped,

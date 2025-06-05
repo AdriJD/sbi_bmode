@@ -35,9 +35,13 @@ def write_maps(B_maps, output_dir=None):
             
     return map_tmpdir
 
+# TODO: fix unit, see pyilc/input.py Should I just add the unit to the header of the tmp files written to disk?
+
 def get_nilc_maps(pyilc_path, map_tmpdir, nsplit, nside, fiducial_beta, fiducial_T_dust, freq_pivot_dust, 
-                  central_freqs, beam_fwhms, use_dust_map=True, use_dbeta_map=False, 
-                  deproj_dust=False, deproj_dbeta=False, output_dir=None, remove_files=True, debug=False):
+                  central_freqs, beam_fwhms, use_dust_map=True, use_dbeta_map=False, use_sync_map=False,
+                  use_dbeta_sync_map=False, deproj_dust=False, deproj_dbeta=False, deproj_sync=False,
+                  deproj_dbeta_sync=False, fiducial_beta_sync=None, freq_pivot_sync=None, output_dir=None,
+                  remove_files=True, debug=False):
     '''
     Run pyilc and return NILC map(s).
 
@@ -65,10 +69,22 @@ def get_nilc_maps(pyilc_path, map_tmpdir, nsplit, nside, fiducial_beta, fiducial
         Whether to produce dust map.
     use_dbeta_map : Bool, optional
         Whether to build map of first moment w.r.t. beta.
+    use_sync_map : Bool, optional
+        Whether to produce sync map.
+    use_dbeta_sync_map : Bool, optional
+        Whether to build map of first moment w.r.t. beta synchrotron.
     deproj_dust : Bool, optional
         Whether to deproject dust in CMB NILC map.
     deproj_dbeta : Bool, optional
         Whether to deproject first moment of dust w.r.t. beta in CMB NILC map.
+    deproj_sync : Bool, optional
+        Whether to deproject synchrotron in CMB NILC map.
+    deproj_dbeta_sync : Bool, optional
+        Whether to deproject first moment of dust w.r.t. beta synchrotron in CMB NILC map.
+    fiducial_beta_sync : float. optional
+        Beta synchrotron parameter.
+    freq_pivot_sync : float, None
+        Pivot frequency of synchrotron SED in Hz.
     output_dir : str, optional
         Directory in which to make temporary directory for NILC maps (if set to None,
         the default $TMPDIR will be used).
@@ -79,17 +95,16 @@ def get_nilc_maps(pyilc_path, map_tmpdir, nsplit, nside, fiducial_beta, fiducial
 
     Returns
     -------
-    nilc_maps: (nsplit, ncomp=1, 2 or 3, npix) ndarray
+    nilc_maps: (nsplit, ncomp=1, 2, 3, 4 or 5, npix) ndarray
         NILC maps for ncomp, the first index is for CMB NILC maps and the second index
-        is for dust NILC maps.
+        is for dust, dbeta, sync, dbeta_sync NILC maps.
     '''
-
-    if not use_dust_map and use_dbeta_map:
-        raise ValueError('Cannot use dbeta map wihout dust map.')
 
     Ncomp = 1
     if use_dust_map: Ncomp += 1
     if use_dbeta_map: Ncomp += 1
+    if use_sync_map: Ncomp += 1
+    if use_dbeta_sync_map: Ncomp += 1
 
     nilc_maps = np.zeros((nsplit, Ncomp, 12*nside**2), dtype=np.float32)
     
@@ -127,10 +142,15 @@ def get_nilc_maps(pyilc_path, map_tmpdir, nsplit, nside, fiducial_beta, fiducial
             [f'{map_tmpdir}/map_split{split}_freq{f}.fits' for f in range(pyilc_input_params['N_freqs'])] 
         pyilc_input_params['save_as'] = 'fits'
 
-        # Dust parameters.
-        pars = {'beta_CIB': float(fiducial_beta), 'Tdust_CIB': float(fiducial_T_dust),
+        # Foreground parameters.
+        nu0_radio_ghz = float(freq_pivot_sync) * 1e-9 if freq_pivot_sync is not None else 22.0
+        beta_radio = float(fiducial_beta_sync) if fiducial_beta_sync is not None else -3.0
+        pars = {'beta_CIB': float(fiducial_beta),
+                'Tdust_CIB': float(fiducial_T_dust),
                 'nu0_CIB_ghz': float(freq_pivot_dust) * 1e-9,
-                'kT_e_keV':5.0, 'nu0_radio_ghz':150.0, 'beta_radio': -0.5}
+                'kT_e_keV': 5.0,
+                'nu0_radio_ghz' : nu0_radio_ghz,
+                'beta_radio': beta_radio}
         dust_pars_yaml = f'{nilc_tmpdir}/dust_pars.yaml'
         with open(dust_pars_yaml, 'w') as outfile:
             yaml.dump(pars, outfile, default_flow_style=None)
@@ -139,41 +159,100 @@ def get_nilc_maps(pyilc_path, map_tmpdir, nsplit, nside, fiducial_beta, fiducial
         # CMB-specific and dust-specific dictionaries.
         cmb_param_dict = {'ILC_preserved_comp': 'CMB'}
         cmb_param_dict.update(pyilc_input_params)
+        cmb_oname = 'needletILCmap_component_CMB'
+        ilc_deproj_comps = []
+        if (deproj_dust or use_dust_map):
+            ilc_deproj_comps.append('CIB')
+        if deproj_dbeta or use_dbeta_map:
+            ilc_deproj_comps.append('CIB_dbeta')
+        if (deproj_sync or use_sync_map):
+            ilc_deproj_comps.append('radio')
+        if deproj_dbeta_sync or use_dbeta_sync_map:
+            ilc_deproj_comps.append('radio_dbeta')
 
-        if (deproj_dust or use_dust_map) and (deproj_dbeta or use_dbeta_map):
-            cmb_param_dict['ILC_deproj_comps'] = ['CIB','CIB_dbeta']
-            cmb_param_dict['N_deproj'] = 2
-            cmb_oname = 'needletILCmap_component_CMB_deproject_CIB_CIB_dbeta'
-        elif (deproj_dust or use_dust_map):
-            cmb_param_dict['ILC_deproj_comps'] = ['CIB']
-            cmb_param_dict['N_deproj'] = 1
-            cmb_oname = 'needletILCmap_component_CMB_deproject_CIB'            
-        elif (deproj_dbeta or use_dbeta_map):
-            raise ValueError("Cannot deproject dbeta without deprojecting dust")
-        else:
-            cmb_oname = 'needletILCmap_component_CMB'
-
-        comps = ['CMB']
-        all_param_dicts = [cmb_param_dict]        
+        cmb_param_dict['N_deproj'] = len(ilc_deproj_comps)
+        cmb_param_dict['ILC_deproj_comps'] = ilc_deproj_comps
+        if len(ilc_deproj_comps) > 0:
+            cmb_oname += f'_deproject_{'_'.join(ilc_deproj_comps)}'
+            
+        comps = ['CMB']        
+        all_param_dicts = [cmb_param_dict]
+        
         if use_dust_map:
-            dust_param_dict = {'ILC_preserved_comp': 'CIB'} 
-            dust_param_dict.update(pyilc_input_params)
-            if (deproj_dbeta or use_dbeta_map):
-                dust_param_dict['ILC_deproj_comps'] = ['CMB', 'CIB_dbeta']
-            else:
-                dust_param_dict['ILC_deproj_comps'] = ['CMB']
-            all_param_dicts.append(dust_param_dict)
             comps.append('dust')
+            dust_oname = 'needletILCmap_component_CIB'
+            ilc_deproj_comps_dust = ['CMB']
+            if (deproj_dbeta or use_dbeta_map):
+                ilc_deproj_comps_dust.append('CIB_dbeta')
+            if (deproj_sync or use_sync_map):
+                ilc_deproj_comps_dust.append('radio')
+            if (deproj_dbeta_sync or use_dbeta_sync_map):
+                ilc_deproj_comps_dust.append('radio_dbeta')
+
+            dust_param_dict = {'ILC_preserved_comp': 'CIB'}
+            dust_param_dict.update(pyilc_input_params)
+            dust_param_dict['ILC_deproj_comps'] = ilc_deproj_comps_dust
+            dust_param_dict['N_deproj'] = len(ilc_deproj_comps_dust)
+            all_param_dicts.append(dust_param_dict)
+            dust_oname += f'_deproject_{'_'.join(ilc_deproj_comps_dust)}'
+            
         if use_dbeta_map:
+
+            comps.append('dbeta')
+            dbeta_oname = 'needletILCmap_component_CIB_dbeta'
+            ilc_deproj_comps_dbeta = ['CMB']
+            if (deproj_dust or use_dust_map):
+                ilc_deproj_comps_dbeta.append('CIB')
+            if (deproj_sync or use_sync_map):
+                ilc_deproj_comps_dbeta.append('radio')
+            if (deproj_dbeta_sync or use_dbeta_sync_map):
+                ilc_deproj_comps_dbeta.append('radio_dbeta')
+
             dbeta_param_dict = {'ILC_preserved_comp': 'CIB_dbeta'}
             dbeta_param_dict.update(pyilc_input_params)
-            if (deproj_dust or use_dust_map)
-                dbeta_param_dict['ILC_deproj_comps'] = ['CMB', 'CIB']
-            else:
-                dbeta_param_dict['ILC_deproj_comps'] = ['CMB']
+            dbeta_param_dict['ILC_deproj_comps'] = ilc_deproj_comps_dbeta
+            dbeta_param_dict['N_deproj'] = len(ilc_deproj_comps_dbeta)
             all_param_dicts.append(dbeta_param_dict)
-            comps.append('dbeta')
+            dbeta_oname += f'_deproject_{'_'.join(ilc_deproj_comps_dbeta)}'
 
+        if use_sync_map:
+
+            comps.append('sync')
+            sync_oname = 'needletILCmap_component_radio'
+            ilc_deproj_comps_sync = ['CMB']
+            if (deproj_dust or use_dust_map):
+                ilc_deproj_comps_sync.append('CIB')
+            if (deproj_dbeta or use_dbeta_map):
+                ilc_deproj_comps_sync.append('CIB_dbeta')
+            if (deproj_dbeta_sync or use_dbeta_sync_map):
+                ilc_deproj_comps_sync.append('radio_dbeta')
+
+            sync_param_dict = {'ILC_preserved_comp': 'radio'}
+            sync_param_dict.update(pyilc_input_params)
+            sync_param_dict['ILC_deproj_comps'] = ilc_deproj_comps_sync
+            sync_param_dict['N_deproj'] = len(ilc_deproj_comps_sync)
+            all_param_dicts.append(sync_param_dict)
+            sync_oname += f'_deproject_{'_'.join(ilc_deproj_comps_sync)}'
+ 
+        if use_dbeta_sync_map:
+
+            comps.append('dbeta_sync')
+            dbeta_sync_oname = 'needletILCmap_component_radio_dbeta'            
+            ilc_deproj_comps_dbeta_sync = ['CMB']
+            if (deproj_dust or use_dust_map):
+                ilc_deproj_comps_dbeta_sync.append('CIB')
+            if (deproj_dbeta or use_dbeta_map):
+                ilc_deproj_comps_dbeta_sync.append('CIB_dbeta')
+            if (deproj_sync or use_sync_map):
+                ilc_deproj_comps_dbeta_sync.append('radio')
+
+            dbeta_sync_param_dict = {'ILC_preserved_comp': 'radio_dbeta'}
+            dbeta_sync_param_dict.update(pyilc_input_params)
+            dbeta_sync_param_dict['ILC_deproj_comps'] = ilc_deproj_comps_dbeta_sync
+            dbeta_sync_param_dict['N_deproj'] = len(ilc_deproj_comps_dbeta_sync)
+            all_param_dicts.append(dbeta_sync_param_dict)           
+            dbeta_sync_oname += f'_deproject_{'_'.join(ilc_deproj_comps_dbeta_sync)}'
+                                    
         # Dump CMB and dust yaml files.
         all_yaml_files = [f'{nilc_tmpdir}/split{split}_{comp}_preserved.yml' for comp in comps]
         for c, comp in enumerate(comps):
@@ -182,7 +261,8 @@ def get_nilc_maps(pyilc_path, map_tmpdir, nsplit, nside, fiducial_beta, fiducial
 
         # Run pyilc for each preserved component.
         stdout = subprocess.DEVNULL if not debug else None
-        
+
+        # UPDATE THIS TO ALWAYS WRITE TO A FILE IN THE TEMP DIRECTORY.
         for c, comp in enumerate(comps):
             subprocess.run([f"python {pyilc_path}/pyilc/main.py {all_yaml_files[c]}"],
                            shell=True, env=env, stdout=stdout, stderr=stdout)
@@ -190,12 +270,23 @@ def get_nilc_maps(pyilc_path, map_tmpdir, nsplit, nside, fiducial_beta, fiducial
         # Load NILC maps, then remove nilc tmpdir.
         cmb_nilc = hp.read_map(f'{nilc_tmpdir}/{cmb_oname}.fits')
         nilc_maps[split,0] = cmb_nilc
+        idx = 1
         if use_dust_map:
-            dust_nilc = hp.read_map(f'{nilc_tmpdir}/needletILCmap_component_CIB.fits')
-            nilc_maps[split,1] = dust_nilc
+            dust_nilc = hp.read_map(f'{nilc_tmpdir}/{dust_oname}.fits')
+            nilc_maps[split,idx] = dust_nilc
+            idx += 1
         if use_dbeta_map:
-            dbeta_nilc = hp.read_map(f'{nilc_tmpdir}/needletILCmap_component_CIB_dbeta.fits')            
-            nilc_maps[split,2] = dbeta_nilc
+            dbeta_nilc = hp.read_map(f'{nilc_tmpdir}/{dbeta_oname}.fits')
+            nilc_maps[split,idx] = dbeta_nilc
+            idx += 1
+        if use_sync_map:
+            sync_nilc = hp.read_map(f'{nilc_tmpdir}/{sync_oname}.fits')
+            nilc_maps[split,idx] = sync_nilc
+            idx += 1
+        if use_dbeta_sync_map:
+            dbeta_sync_nilc = hp.read_map(f'{nilc_tmpdir}/{dbeta_sync_oname}.fits')
+            nilc_maps[split,idx] = dbeta_sync_nilc
+            idx += 1
             
         if remove_files:
             shutil.rmtree(nilc_tmpdir)

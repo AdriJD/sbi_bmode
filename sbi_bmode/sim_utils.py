@@ -39,16 +39,32 @@ class CMBSimulator():
         Only relevant if using nilc (pyilc dir is not None). Whether
         to build map of first moment w.r.t. beta and include it in
         auto- and cross-spectra in the data vector
+    use_sync_map: bool, optional
+        Only relevant if using nilc (pyilc dir is not None). Whether
+        to build map of synchrotron and include it in auto- and cross-spectra in
+        the data vector
+    use_dbeta_sync_map: bool, optional
+        Only relevant if using nilc (pyilc dir is not None). Whether
+        to build map of first moment w.r.t. beta_synchrotron and include it in
+        auto- and cross-spectra in the data vector
     deproj_dust: bool, optional
         Only relevant if using nilc (pyilc dir is not None). Whether to
         deproject dust in CMB NILC map.
     deproj_dbeta: bool, optional
         Only relevant if using nilc (pyilc dir is not None). Whether to
         deproject first moment of dust w.r.t. beta in CMB NILC map.
+    deproj_sync: bool, optional
+        Only relevant if using nilc (pyilc dir is not None). Whether to
+        deproject synchrotron in CMB NILC map.
+    deproj_dbeta_sync: bool, optional
+        Only relevant if using nilc (pyilc dir is not None). Whether to
+        deproject first moment of synchrotron w.r.t. beta in CMB NILC map.
     fiducial_beta: float, optional
         Use this value for beta when building nilc maps.
     fiducial_T_dust: float, optional
         Use this value for T_dust when building nilc maps.
+    fiducial_beta_sync: float, optional
+        Use this value for beta_synchrotron when building nilc maps.
     odir: str
         Path to output directory
     norm_params: dict, optional
@@ -63,8 +79,10 @@ class CMBSimulator():
     '''
 
     def __init__(self, specdir, data_dict, fixed_params_dict, pyilcdir=None, use_dust_map=True,
-                 use_dbeta_map=False, deproj_dust=False, deproj_dbeta=False, fiducial_beta=None,
-                 fiducial_T_dust=None, odir=None, norm_params=None, score_params=None,
+                 use_dbeta_map=False, use_sync_map=False, use_dbeta_sync_map=False,
+                 deproj_dust=False, deproj_dbeta=False, deproj_sync=False, deproj_dbeta_sync=False,
+                 fiducial_beta=None, fiducial_T_dust=None, fiducial_beta_sync=None,
+                 odir=None, norm_params=None, score_params=None,
                  coadd_equiv_crosses=True, apply_highpass_filter=True):
 
         self.lmax = data_dict['lmax']
@@ -75,10 +93,15 @@ class CMBSimulator():
         self.pyilcdir = pyilcdir
         self.use_dust_map = use_dust_map
         self.use_dbeta_map = use_dbeta_map
+        self.use_sync_map = use_sync_map
+        self.use_dbeta_sync_map = use_dbeta_sync_map        
         self.deproj_dust = deproj_dust
         self.deproj_dbeta = deproj_dbeta
+        self.deproj_sync = deproj_sync
+        self.deproj_dbeta_sync = deproj_dbeta_sync        
         self.fiducial_beta = fiducial_beta
         self.fiducial_T_dust = fiducial_T_dust
+        self.fiducial_beta_sync = fiducial_beta_sync
         self.odir = odir
         self.bins = np.arange(self.lmin, self.lmax, self.delta_ell)
         self.coadd_equiv_crosses = coadd_equiv_crosses
@@ -108,18 +131,21 @@ class CMBSimulator():
                 self.lmin, self.lmax, data_dict['highpass_delta_ell'])
         else:
             self.highpass_filter = None
-            
+
         if pyilcdir:
-            if not use_dust_map and self.use_dbeta_map:
-                raise ValueError('Cannot use dbeta map wihout dust map.')
             self.ncomp = 1
             if self.use_dust_map: self.ncomp += 1
             if self.use_dbeta_map: self.ncomp += 1
+            if self.use_sync_map: self.ncomp += 1
+            if self.use_dbeta_sync_map: self.ncomp += 1
+            
             self.sels_to_coadd = get_coadd_sels(self.nsplit, self.ncomp)
             self.size_data = len(self.sels_to_coadd) * (self.bins.size - 1)
             if self.use_dust_map or self.deproj_dust or self.deproj_dbeta:
                 assert self.fiducial_beta is not None
                 assert self.fiducial_T_dust is not None
+            if self.use_sync_map or self.deproj_sync or self.deproj_dbeta_sync:
+                assert self.fiducial_beta_sync is not None
         else:
             self.sels_to_coadd = get_coadd_sels(self.nsplit, self.nfreq)
             self.size_data = len(self.sels_to_coadd) * (self.bins.size - 1)
@@ -136,12 +162,16 @@ class CMBSimulator():
 
         # Fixed parameters.
         self.freq_pivot_dust = fixed_params_dict['freq_pivot_dust']
+        self.freq_pivot_sync = fixed_params_dict.get('freq_pivot_sync')
         assert self.freq_pivot_dust > 1e9, "Freq pivot dust has to be in GHz."
+        if self.freq_pivot_sync is not None:
+            assert self.freq_pivot_sync > 1e9, "Freq pivot sync has to be in GHz."
         self.temp_dust = fixed_params_dict['temp_dust']
 
         self.norm_params = norm_params
         if self.norm_params and pyilcdir is None:
 
+            # UPDATE WITH SYNC.
             self.norm_model = np.asarray(self.get_signal_spectra(
                 norm_params['r_tensor'], norm_params['A_lens'], norm_params['A_d_BB'],
                 norm_params['alpha_d_BB'], norm_params['beta_dust']))
@@ -155,6 +185,7 @@ class CMBSimulator():
         self.score_params = score_params
         if self.score_params and pyilcdir is None:
 
+            # UPDATE WITH SYNC.
             if self.score_params and self.norm_params:
                 raise ValueError('Cannot have both norm_params and score_params')
 
@@ -310,7 +341,9 @@ class CMBSimulator():
         return cov_bin
 
     def draw_data(self, r_tensor, A_lens, A_d_BB, alpha_d_BB, beta_dust,
-                  seed, amp_beta_dust=None, gamma_beta_dust=None):
+                  seed, amp_beta_dust=None, gamma_beta_dust=None, A_s_BB=None,
+                  alpha_s_BB=None, beta_sync=None,
+                  amp_beta_sync=None, gamma_beta_sync=None, rho_ds=None):
         '''
         Draw data realization.
 
@@ -332,6 +365,18 @@ class CMBSimulator():
             Amplitude of dust beta power spectrum at pivot multipole.
         gamma_beta_dust : float, optional
             Tilt of dust beta power spectrum.
+        A_s_BB : float
+            Synchrotron amplitude.
+        alpha_s_BB : float
+            Synchrotron spatial power law index.
+        beta_sync : float
+            Synchrotron frequency power law index.
+        amp_beta_sync : float, optional
+            Amplitude of synchrotron beta power spectrum at pivot multipole.
+        gamma_beta_sync : float, optional
+            Tilt of synchrotron beta power spectrum.
+        rho_ds : float, optional
+            Correlation coefficient between dust and synchroton amplitudes.
 
         Returns
         -------
@@ -348,6 +393,9 @@ class CMBSimulator():
             r_tensor, A_lens, self.freqs, seed, self.nsplit, self.noise_cov_ell,
             self.cov_scalar_ell, self.cov_tensor_ell, self.b_ells, self.minfo, self.ainfo,
             amp_beta_dust=amp_beta_dust, gamma_beta_dust=gamma_beta_dust,
+            A_s_BB=A_s_BB, alpha_s_BB=alpha_s_BB, beta_sync=beta_sync,
+            freq_pivot_sync=self.freq_pivot_sync, amp_beta_sync=amp_beta_sync,
+            gamma_beta_sync=gamma_beta_sync, rho_ds=rho_ds,
             signal_filter=self.highpass_filter)
 
         if self.pyilcdir:
@@ -366,8 +414,12 @@ class CMBSimulator():
                 self.pyilcdir, map_tmpdir, self.nsplit, self.nside, self.fiducial_beta,
                 self.fiducial_T_dust, self.freq_pivot_dust, self.freqs,
                 self.beam_fwhms, use_dust_map=self.use_dust_map, use_dbeta_map=self.use_dbeta_map,
+                use_sync_map=self.use_sync_map, use_dbeta_sync_map=self.use_dbeta_sync_map,
                 deproj_dust=self.deproj_dust, deproj_dbeta=self.deproj_dbeta,
+                deproj_sync=self.deproj_sync, deproj_dbeta_sync=self.deproj_dbeta_sync,
+                fiducial_beta_sync=self.fiducial_beta_sync, freq_pivot_sync=self.freq_pivot_sync,
                 output_dir=self.odir, remove_files=True, debug=False)
+
             spectra = estimate_spectra_nilc(nilc_maps, self.minfo, self.ainfo)
 
         else:
@@ -534,7 +586,10 @@ def get_beta_map(minfo, ainfo, beta0, amp, gamma, seed, ell_0=1, ell_cutoff=1):
 def gen_data(A_d_BB, alpha_d_BB, beta_dust, freq_pivot_dust, temp_dust,
              r_tensor, A_lens, freqs, seed, nsplit, cov_noise_ell,
              cov_scalar_ell, cov_tensor_ell, b_ells, minfo, ainfo,
-             amp_beta_dust=None, gamma_beta_dust=None, signal_filter=None):
+             amp_beta_dust=None, gamma_beta_dust=None, A_s_BB=None,
+             alpha_s_BB=None, beta_sync=None, freq_pivot_sync=None,
+             amp_beta_sync=None, gamma_beta_sync=None, rho_ds=None,
+             signal_filter=None):
     '''
     Generate simulated maps.
 
@@ -576,6 +631,20 @@ def gen_data(A_d_BB, alpha_d_BB, beta_dust, freq_pivot_dust, temp_dust,
         Amplitude of dust beta power spectrum at pivot multipole.
     gamma_beta_dust : float, optional
         Tilt of dust beta power spectrum.
+    A_s_BB : float
+        Synchrotron amplitude.
+    alpha_s_BB : float
+        Synchrotron spatial power law index.
+    beta_sync : float
+        Synchrotron frequency power law index.
+    freq_pivot_sync: float
+        Pivot frequency for the synchrotron frequency power law.
+    amp_beta_sync : float, optional
+        Amplitude of synchrotron beta power spectrum at pivot multipole.
+    gamma_beta_sync : float, optional
+        Tilt of synchrotron beta power spectrum.
+    rho_ds : float, optional
+        Correlation coefficient between dust and synchroton amplitudes.
     signal_filter : (nell) array. optional
         Harmonic filter that is applied to the signal (similar to beam).
 
@@ -599,35 +668,66 @@ def gen_data(A_d_BB, alpha_d_BB, beta_dust, freq_pivot_dust, temp_dust,
     # Generate the CMB spectra.
     cov_ell = spectra_utils.get_combined_cmb_spectrum(
         r_tensor, A_lens, cov_scalar_ell, cov_tensor_ell)
-    cov_dust_ell = np.zeros_like(cov_ell)
     lmax = cov_ell.shape[-1] - 1
     assert ainfo.lmax == lmax
+    
+    #cov_dust_ell = np.zeros_like(cov_ell)
+    if A_s_BB is not None:
+        ncomp_fg = 2
+    else:
+        ncomp_fg = 1        
+    cov_fg_ell = np.zeros((ncomp_fg, ncomp_fg, lmax + 1))
 
     # Generate frequency-independent signal, scale with frequency later.
-    cov_dust_ell[1,1] = spectra_utils.get_ell_shape(lmax, alpha_d_BB, ell_pivot=80)
-    cov_dust_ell[1,1] *= A_d_BB
-    
-    cmb_alm = alm_utils.rand_alm(cov_ell, ainfo, rng_cmb, dtype=np.complex128)
-    dust_alm = alm_utils.rand_alm(cov_dust_ell, ainfo, rng_dust, dtype=np.complex128)
+    cov_fg_ell[0,0] = spectra_utils.get_ell_shape(lmax, alpha_d_BB, ell_pivot=80)
+    cov_fg_ell[0,0] *= A_d_BB
 
+    if A_s_BB is not None:
+        cov_fg_ell[1,1] = spectra_utils.get_ell_shape(lmax, alpha_s_BB, ell_pivot=80)
+        cov_fg_ell[1,1] *= A_s_BB
+
+        if rho_ds is not None:
+            cov_fg_ell[0,1] = rho_ds * np.sqrt(cov_fg_ell[0,0] * cov_fg_ell[1,1])
+            cov_fg_ell[1,0] = cov_fg_ell[0,1]
+        
+    cmb_alm = alm_utils.rand_alm(cov_ell, ainfo, rng_cmb, dtype=np.complex128)
+    fg_alm = alm_utils.rand_alm(cov_fg_ell, ainfo, rng_dust, dtype=np.complex128)    
+
+    if A_s_BB is not None:
+        if (gamma_beta_dust != gamma_beta_sync) and None in (gamma_beta_dust, gamma_beta_sync):
+            # Raises error only if one of two is None.
+            raise ValueError('We only support either both dust and sync gammas or none.')
+    
     if gamma_beta_dust is not None:
         assert amp_beta_dust is not None
 
         # Create real-space dust map.
+        alm_tmp = np.zeros((2, ainfo.nelem), dtype=np.complex128)
+        alm_tmp[1] = fg_alm[0]
         dust_map = np.zeros((2, minfo.npix))
-        sht.alm2map(dust_alm, dust_map, ainfo, minfo, 2)
+        sht.alm2map(alm_tmp, dust_map, ainfo, minfo, 2)
 
         # Generate the dust beta map.
         beta_dust = get_beta_map(minfo, ainfo, beta_dust, amp_beta_dust, gamma_beta_dust, rng_beta)
+        
+        if A_s_BB is not None:
+            alm_tmp[1] = fg_alm[1]
+            sync_map = np.zeros((2, minfo.npix))
+            sht.alm2map(alm_tmp, sync_map, ainfo, minfo, 2)            
+            beta_sync = get_beta_map(minfo, ainfo, beta_sync, amp_beta_sync, gamma_beta_sync, rng_beta)
+        else:
+            sync_map, beta_sync = None, None
 
         gen_data_per_freq = lambda freq, cov_noise_ell, b_ell: _gen_data_per_freq_gamma(
             freq, cov_noise_ell, beta_dust, temp_dust, freq_pivot_dust,
-            cmb_alm, dust_map, nsplit, rngs_noise, ainfo, minfo, b_ell)
+            cmb_alm, dust_map, nsplit, rngs_noise, ainfo, minfo, b_ell, sync_map=sync_map,
+            beta_sync=beta_sync, freq_pivot_sync=freq_pivot_sync)
 
     else:
         gen_data_per_freq = lambda freq, cov_noise_ell, b_ell: _gen_data_per_freq_simple(
             freq, cov_noise_ell, beta_dust, temp_dust, freq_pivot_dust,
-            cmb_alm, dust_alm, nsplit, rngs_noise, ainfo, minfo, b_ell)
+            cmb_alm, fg_alm, nsplit, rngs_noise, ainfo, minfo, b_ell, beta_sync=beta_sync,
+            freq_pivot_sync=freq_pivot_sync)
 
     for fidx, freq in enumerate(freqs):
         
@@ -639,7 +739,8 @@ def gen_data(A_d_BB, alpha_d_BB, beta_dust, freq_pivot_dust, temp_dust,
     return out
 
 def _gen_data_per_freq_simple(freq, cov_noise_ell, beta_dust, temp_dust, freq_pivot_dust,
-                              cmb_alm, dust_alm, nsplit, rngs_noise, ainfo, minfo, b_ell):
+                              cmb_alm, fg_alm, nsplit, rngs_noise, ainfo, minfo, b_ell,
+                              beta_sync=None, freq_pivot_sync=None):
     '''
     Generate data for a given frequency, using a data model with constant beta.
 
@@ -657,8 +758,8 @@ def _gen_data_per_freq_simple(freq, cov_noise_ell, beta_dust, temp_dust, freq_pi
         Pivot frequency for the frequency power law in Hz.
     cmb_alm : (2, nelem) complex array
         CMB E- and B-mode alms.
-    dust_alm : (2, nelem) complex array
-        Dust amplitude E- and B-mode alms.
+    fg_alm : (1, nelem) or (2, nelem) complex array
+        Dust (and possibly synchrotron) B-mode amplitude alms.
     nsplit : int
         Number of splits of the data that have independent noise.
     rngs_noise : array-like of numpy.random._generator.Generator object
@@ -669,6 +770,10 @@ def _gen_data_per_freq_simple(freq, cov_noise_ell, beta_dust, temp_dust, freq_pi
         Geometry of output map.
     b_ell : (lmax + 1) array
         Beam for this frequency.
+    beta_sync : float, optional
+        Synchrotron frequency power law index.
+    freq_pivot_sync : float, optional
+        Pivot frequency for the synchrotron frequency power law in Hz.
 
     Returns
     -------
@@ -678,13 +783,21 @@ def _gen_data_per_freq_simple(freq, cov_noise_ell, beta_dust, temp_dust, freq_pi
 
     out = np.zeros((nsplit, 2, minfo.npix))
 
-    dust_factor = spectra_utils.get_sed_dust(
-        freq, beta_dust, temp_dust, freq_pivot_dust)
-    g_factor = spectra_utils.get_g_fact(freq) / spectra_utils.get_g_fact(freq_pivot_dust)
-
+    dust_factor = np.sqrt(spectra_utils.get_sed_dust(
+        freq, beta_dust, temp_dust, freq_pivot_dust))
+    dust_factor *= spectra_utils.get_g_fact(freq) / spectra_utils.get_g_fact(freq_pivot_dust)
+    
     signal_alm = cmb_alm.copy()
-    signal_alm += dust_alm * np.sqrt(dust_factor) * g_factor
+    signal_alm[1] += fg_alm[0] * dust_factor
 
+    ncomp_fg = fg_alm.shape[0]
+    if ncomp_fg == 2:
+        assert not None in (beta_sync, freq_pivot_sync)
+        sync_factor = np.sqrt(spectra_utils.get_sed_sync(
+            freq, beta_sync, freq_pivot_sync))
+        sync_factor *= spectra_utils.get_g_fact(freq) / spectra_utils.get_g_fact(freq_pivot_sync)                    
+        signal_alm[1] += fg_alm[1] * sync_factor
+    
     # Apply beam.
     signal_alm = alm_c_utils.lmul(signal_alm, b_ell, ainfo, inplace=False)
 
@@ -698,7 +811,8 @@ def _gen_data_per_freq_simple(freq, cov_noise_ell, beta_dust, temp_dust, freq_pi
     return out
 
 def _gen_data_per_freq_gamma(freq, cov_noise_ell, beta_dust, temp_dust, freq_pivot_dust,
-                             cmb_alm, dust_map, nsplit, rngs_noise, ainfo, minfo, b_ell):
+                             cmb_alm, dust_map, nsplit, rngs_noise, ainfo, minfo, b_ell,
+                             sync_map=None, beta_sync=None, freq_pivot_sync=None):
     '''
     Generate data for a given frequency, using a data model with varying beta.
 
@@ -716,7 +830,7 @@ def _gen_data_per_freq_gamma(freq, cov_noise_ell, beta_dust, temp_dust, freq_piv
         Pivot frequency for the frequency power law.
     cmb_alm : (2, nelem) complex array
         CMB E- and B-mode alms.
-    dust_map : (2, nelem) complex array
+    dust_map : (2, nelem) array
         Dust amplitude Stokes Q and U maps.
     nsplit : int
         Number of splits of the data that have independent noise.
@@ -728,6 +842,12 @@ def _gen_data_per_freq_gamma(freq, cov_noise_ell, beta_dust, temp_dust, freq_piv
         Geometry of output map.
     b_ell : (lmax + 1) array
         Beam for this frequency.
+    sync_map : (2, nelem) array, optional
+        Synchrotron amplitude Stokes Q and U maps.
+    beta_sync : (npix) array
+        Beta synchrotron map, including monopole of beta.
+    freq_pivot_sync : float
+        Pivot frequency for the synchrotron frequency power law.
 
     Returns
     -------
@@ -737,16 +857,23 @@ def _gen_data_per_freq_gamma(freq, cov_noise_ell, beta_dust, temp_dust, freq_piv
 
     out = np.zeros((nsplit, 2, minfo.npix))
 
-    g_factor = spectra_utils.get_g_fact(freq) / spectra_utils.get_g_fact(freq_pivot_dust)
-
     # Apply spatially varying SED scaling in real space.
     sed_map = spectra_utils.get_sed_dust(freq, beta_dust, temp_dust, freq_pivot_dust)
-    scaled_dust_map = dust_map * np.sqrt(sed_map) * g_factor
+    scaled_dust_map = dust_map * np.sqrt(sed_map)
+    scaled_dust_map *= spectra_utils.get_g_fact(freq) / spectra_utils.get_g_fact(freq_pivot_dust)
 
+    fg_map = scaled_dust_map
+    
+    if sync_map is not None:
+        sed_sync_map = spectra_utils.get_sed_sync(freq, beta_sync, freq_pivot_sync)
+        scaled_sync_map = sync_map * np.sqrt(sed_map)
+        scaled_sync_map *= spectra_utils.get_g_fact(freq) / spectra_utils.get_g_fact(freq_pivot_sync)
+        fg_map += scaled_sync_map
+        
     # Apply beam.
-    dust_alm = np.zeros(cmb_alm.shape, dtype=np.complex128)
-    sht.map2alm(scaled_dust_map, dust_alm, minfo, ainfo, 2)
-    signal_alm = cmb_alm + dust_alm
+    fg_alm = np.zeros(cmb_alm.shape, dtype=np.complex128)
+    sht.map2alm(fg_map, fg_alm, minfo, ainfo, 2)
+    signal_alm = cmb_alm + fg_alm
     signal_alm = alm_c_utils.lmul(signal_alm, b_ell, ainfo, inplace=False)
 
     for sidx in range(nsplit):
