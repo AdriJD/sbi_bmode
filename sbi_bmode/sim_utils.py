@@ -407,7 +407,7 @@ class CMBSimulator():
                     sht.map2alm(omap[split,f], tmp_alm, self.minfo, self.ainfo, 2)
                     sht.alm2map(tmp_alm[1], B_maps[split,f], self.ainfo, self.minfo, 0)
 
-            B_maps *= 1e-6
+            B_maps *= 1e-6 # Convert to K because pyilc assumes that input is in K.
 
             map_tmpdir = nilc_utils.write_maps(B_maps, output_dir=self.odir)
             nilc_maps = nilc_utils.get_nilc_maps(

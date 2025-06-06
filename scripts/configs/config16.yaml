@@ -40,12 +40,12 @@ params:
     true_value: 1.55
   amp_beta_dust:
     prior_type: "TruncatedNormal"
-    prior_params: [0.3, 2.0, 0, 3.]
+    prior_params: [0.3, 0.5, 0, 1.59]
     true_value: 0.4
   gamma_beta_dust:
     prior_type: "TruncatedNormal"
-    prior_params: [-3., 2., -6., -1.5]
-    true_value: -2.5
+    prior_params: [-4., 1., -6., -1.5]
+    true_value: -3.5
   A_s_BB:
     prior_type: "TruncatedNormal"
     prior_params: [1, 3, 0, 20]
@@ -60,11 +60,11 @@ params:
     true_value: -2.8
   amp_beta_sync:
     prior_type: "TruncatedNormal"
-    prior_params: [0.3, 2.0, 0, 3.]
+    prior_params: [0.3, 0.5, 0, 1.59]
     true_value: 0.3
   gamma_beta_sync:
     prior_type: "TruncatedNormal"
-    prior_params: [-3., 2., -6., -1.5]
+    prior_params: [-4., 1., -6., -1.5]
     true_value: -3.0
   rho_ds:
     prior_type: "Normal"

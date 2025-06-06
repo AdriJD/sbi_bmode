@@ -35,8 +35,6 @@ def write_maps(B_maps, output_dir=None):
             
     return map_tmpdir
 
-# TODO: fix unit, see pyilc/input.py Should I just add the unit to the header of the tmp files written to disk?
-
 def get_nilc_maps(pyilc_path, map_tmpdir, nsplit, nside, fiducial_beta, fiducial_T_dust, freq_pivot_dust, 
                   central_freqs, beam_fwhms, use_dust_map=True, use_dbeta_map=False, use_sync_map=False,
                   use_dbeta_sync_map=False, deproj_dust=False, deproj_dbeta=False, deproj_sync=False,
@@ -141,6 +139,11 @@ def get_nilc_maps(pyilc_path, map_tmpdir, nsplit, nside, fiducial_beta, fiducial
         pyilc_input_params['freq_map_files'] = \
             [f'{map_tmpdir}/map_split{split}_freq{f}.fits' for f in range(pyilc_input_params['N_freqs'])] 
         pyilc_input_params['save_as'] = 'fits'
+
+        # NOTE, I should keep track of these failures. They should never reach 0.9, but values of
+        # 1e-2 seem to be hard to avoid when deprojection four sky components.
+        #pyilc_input_params['resp_tol'] = 0.9
+        pyilc_input_params['resp_tol'] = 1e-2
 
         # Foreground parameters.
         nu0_radio_ghz = float(freq_pivot_sync) * 1e-9 if freq_pivot_sync is not None else 22.0
@@ -260,13 +263,14 @@ def get_nilc_maps(pyilc_path, map_tmpdir, nsplit, nside, fiducial_beta, fiducial
                 yaml.dump(all_param_dicts[c], outfile, default_flow_style=None)
 
         # Run pyilc for each preserved component.
-        stdout = subprocess.DEVNULL if not debug else None
+        #stdout = subprocess.DEVNULL if not debug else None
+        stdout = open(os.path.join(nilc_tmpdir, 'stdout.txt'), "w") if not debug else None
 
-        # UPDATE THIS TO ALWAYS WRITE TO A FILE IN THE TEMP DIRECTORY.
         for c, comp in enumerate(comps):
             subprocess.run([f"python {pyilc_path}/pyilc/main.py {all_yaml_files[c]}"],
-                           shell=True, env=env, stdout=stdout, stderr=stdout)
-        
+                           shell=True, env=env, stdout=stdout, stderr=subprocess.STDOUT)
+        stdout.close()
+            
         # Load NILC maps, then remove nilc tmpdir.
         cmb_nilc = hp.read_map(f'{nilc_tmpdir}/{cmb_oname}.fits')
         nilc_maps[split,0] = cmb_nilc

@@ -81,7 +81,8 @@ run40	like run36 but without nilc
 run41	like run41 but 2x sims and embedding
 run42	like run40 but with SNPE
 
-run43	run with synchrotron and config 16.
+run43	run with synchrotron and config 16, with rtol=0.9
+run43b	run with synchrotron and config 16 with rtol=0.01
 
 mcmc33  
 
