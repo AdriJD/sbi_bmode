@@ -83,7 +83,15 @@ run42	like run40 but with SNPE
 
 run43	run with synchrotron and config 16, with rtol=0.9
 run43b	run with synchrotron and config 16 with rtol=0.01
+run44	like run43 but after finding bug that was re-using dust sed for sync
 
 mcmc33  
 
 checkcov00    check analytic cov with Monte-Carlo
+
+run36b_optuna Optuna run for run36b
+run36b_optuna_b Optuna run 2 for run36b, now 3 hyperparameters
+run36b_optuna_c like b but with mpi
+
+run43_optuna	testing for run43
+run43_optuna_b	with logspace for learning rate, discrete power of 2 batch size and plots.	

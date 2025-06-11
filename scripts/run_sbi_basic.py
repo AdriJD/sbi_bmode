@@ -4,78 +4,23 @@ import pickle
 import argparse
 
 import numpy as np
-import healpy as hp
 from mpi4py import MPI
-from pixell import curvedsky
-from optweight import map_utils
 import torch
 from sbi.inference import SNPE, simulate_for_sbi, FMPE
 from sbi.utils.sbiutils import seed_all_backends
 from sbi.utils.user_input_checks import (
     check_sbi_inputs,
     process_prior,
-    process_simulator,
     MultipleIndependent
 )
 from sbi.neural_nets.embedding_nets import FCEmbedding
 from sbi.neural_nets import posterior_nn, flowmatching_nn
 
 from sbi_bmode import (
-    sim_utils, script_utils, compress_utils, custom_distributions,
-    script_utils)
+    sim_utils, script_utils, compress_utils, custom_distributions)
 
 opj = os.path.join
 comm = MPI.COMM_WORLD
-
-def normalize_simple(data, data_mean, data_std):
-    '''
-    Normalize data vector.
-
-    Parameters
-    ----------
-    data : (nsim, ndata) array
-        Data vector.
-    data_mean : (ndata) array
-        Mean over simulations
-    data_std : (ndata) array
-        Standard deviation over simulations.
-
-    Returns
-    -------
-    data_norm : (nsim, ndata) array
-        Normalized data.
-    '''
-
-    shape = data.shape
-    if data.ndim == 1:
-        data = data[np.newaxis,:]
-
-    return ((data - data_mean) / data_std).reshape(shape)
-
-def unnormalize_simple(data_norm, data_mean, data_std):
-    '''
-    Undo the normalization of a data vector.
-
-    Parameters
-    ----------
-    data_norm : (nsim, ndata) array
-        Normalized data vector.
-    data_mean : (ndata) array
-        Mean over simulations
-    data_std : (ndata) array
-        Standard deviation over simulations.
-
-    Returns
-    -------
-    data : (nsim, ndata) array
-        Unnormalized data.
-    '''
-
-    shape = data_norm.shape
-    if data_norm.ndim == 1:
-        data_norm = data_norm[np.newaxis,:]
-
-    return (data_norm * data_std + data_mean).reshape(shape)
 
 def simulate_for_sbi_mpi(simulator, proposal, param_names, num_sims, ndata, seed, comm,
                          score_compress, mat_compress=None):
@@ -393,7 +338,7 @@ def main(odir, config, specdir, seed, n_train, n_samples, n_rounds, pyilcdir, us
         print(f'{x_obs.size=}')
 
     if norm_simple:
-        x_obs = normalize_simple(x_obs, data_mean, data_std)
+        x_obs = compress_utils.normalize_simple(x_obs, data_mean, data_std)
 
     if embed:
         embedding_net = FCEmbedding(
@@ -424,7 +369,7 @@ def main(odir, config, specdir, seed, n_train, n_samples, n_rounds, pyilcdir, us
         if comm.rank == 0:
 
             if norm_simple:
-                x = normalize_simple(x, torch.as_tensor(data_mean), torch.as_tensor(data_std))
+                x = compress_utils.normalize_simple(x, torch.as_tensor(data_mean), torch.as_tensor(data_std))
 
             print(f'param draws : {theta}')
             print(f'data draws : {x}')
@@ -457,7 +402,7 @@ def main(odir, config, specdir, seed, n_train, n_samples, n_rounds, pyilcdir, us
 
         if comm.rank == 0:
             if norm_simple:
-                x_test = normalize_simple(x_test, torch.as_tensor(data_mean), torch.as_tensor(data_std))
+                x_test = compress_utils.normalize_simple(x_test, torch.as_tensor(data_mean), torch.as_tensor(data_std))
         
     if comm.rank == 0:
         with open(opj(odir, 'posterior.pkl'), "wb") as handle:
@@ -469,7 +414,7 @@ def main(odir, config, specdir, seed, n_train, n_samples, n_rounds, pyilcdir, us
             np.save(opj(odir, 'data.npy'), cmb_simulator.get_unnorm_data(x_obs))
         elif norm_simple:
             np.save(opj(odir, 'data_norm.npy'), x_obs)
-            np.save(opj(odir, 'data.npy'), unnormalize_simple(x_obs, data_mean, data_std))            
+            np.save(opj(odir, 'data.npy'), uncompress_utils.normalize_simple(x_obs, data_mean, data_std))            
             np.save(opj(odir, 'data_mean.npy'), data_mean)
             np.save(opj(odir, 'data_std.npy'), data_std)            
         else:

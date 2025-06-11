@@ -2,6 +2,56 @@ import os
 
 import numpy as np
 
+def normalize_simple(data, data_mean, data_std):
+    '''
+    Normalize data vector.
+
+    Parameters
+    ----------
+    data : (nsim, ndata) array
+        Data vector.
+    data_mean : (ndata) array
+        Mean over simulations
+    data_std : (ndata) array
+        Standard deviation over simulations.
+
+    Returns
+    -------
+    data_norm : (nsim, ndata) array
+        Normalized data.
+    '''
+
+    shape = data.shape
+    if data.ndim == 1:
+        data = data[np.newaxis,:]
+
+    return ((data - data_mean) / data_std).reshape(shape)
+
+def unnormalize_simple(data_norm, data_mean, data_std):
+    '''
+    Undo the normalization of a data vector.
+
+    Parameters
+    ----------
+    data_norm : (nsim, ndata) array
+        Normalized data vector.
+    data_mean : (ndata) array
+        Mean over simulations
+    data_std : (ndata) array
+        Standard deviation over simulations.
+
+    Returns
+    -------
+    data : (nsim, ndata) array
+        Unnormalized data.
+    '''
+
+    shape = data_norm.shape
+    if data_norm.ndim == 1:
+        data_norm = data_norm[np.newaxis,:]
+
+    return (data_norm * data_std + data_mean).reshape(shape)
+
 def get_e_moped_matrix(data, params):
     '''
     Compute a compression matrix from a set of simulated datasets and

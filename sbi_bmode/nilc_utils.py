@@ -142,8 +142,8 @@ def get_nilc_maps(pyilc_path, map_tmpdir, nsplit, nside, fiducial_beta, fiducial
 
         # NOTE, I should keep track of these failures. They should never reach 0.9, but values of
         # 1e-2 seem to be hard to avoid when deprojection four sky components.
-        #pyilc_input_params['resp_tol'] = 0.9
-        pyilc_input_params['resp_tol'] = 1e-2
+        pyilc_input_params['resp_tol'] = 10 # i.e. disable.
+        #pyilc_input_params['resp_tol'] = 1e-2
 
         # Foreground parameters.
         nu0_radio_ghz = float(freq_pivot_sync) * 1e-9 if freq_pivot_sync is not None else 22.0

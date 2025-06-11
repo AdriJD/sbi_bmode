@@ -67,6 +67,43 @@ def get_prior(params_dict):
     
     return prior_list, param_names
 
+def get_param_limits(prior_list, param_names):
+    '''
+    Extract prior limits.
+
+    Parameters
+    ----------
+    prior_list : list of torch.distribition instances
+        Priors.
+    param_names : list of str
+        Parameter names.
+
+    Returns
+    -------
+    param_limits : dict
+        Dictionary with (lower, upper) tuple per parameter.
+    '''
+
+    param_limits = {}
+    for dist, name in zip(prior_list, param_names):
+        
+        support = getattr(dist, 'support', None)
+        
+        if support is not None:
+            lower = getattr(support, 'lower_bound', None)
+            upper = getattr(support, 'upper_bound', None)
+
+            if isinstance(lower, torch.Tensor):
+                lower = float(lower.item())
+            if isinstance(upper, torch.Tensor):
+                upper = float(upper.item())
+
+            param_limits[name] = (lower, upper)
+        else:
+            param_limits[name] = (None, None)
+
+    return param_limits
+
 def get_true_params(params_dict):
     '''
     Extract the true values of the parameters.

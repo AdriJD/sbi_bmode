@@ -866,7 +866,7 @@ def _gen_data_per_freq_gamma(freq, cov_noise_ell, beta_dust, temp_dust, freq_piv
     
     if sync_map is not None:
         sed_sync_map = spectra_utils.get_sed_sync(freq, beta_sync, freq_pivot_sync)
-        scaled_sync_map = sync_map * np.sqrt(sed_map)
+        scaled_sync_map = sync_map * np.sqrt(sed_sync_map)
         scaled_sync_map *= spectra_utils.get_g_fact(freq) / spectra_utils.get_g_fact(freq_pivot_sync)
         fg_map += scaled_sync_map
         
