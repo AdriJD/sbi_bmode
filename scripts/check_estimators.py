@@ -380,7 +380,7 @@ if __name__ == '__main__':
                                          args.odir, config, args.n_samples)
     sampler = optuna.samplers.TPESampler(multivariate=True)
     study = optuna.create_study(study_name='test_study', storage=storage, direction="minimize", load_if_exists=True)
-    #study.optimize(objective, n_trials=2)
+    study.optimize(objective, n_trials=10)
 
     comm.barrier()
     if comm.rank == 0:
