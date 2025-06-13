@@ -141,7 +141,7 @@ def get_nilc_maps(pyilc_path, map_tmpdir, nsplit, nside, fiducial_beta, fiducial
         pyilc_input_params['save_as'] = 'fits'
 
         # NOTE, I should keep track of these failures. They should never reach 0.9, but values of
-        # 1e-2 seem to be hard to avoid when deprojection four sky components.
+        # 1e-2 seem to be hard to avoid when deprojecting four sky components.
         pyilc_input_params['resp_tol'] = 10 # i.e. disable.
         #pyilc_input_params['resp_tol'] = 1e-2
 

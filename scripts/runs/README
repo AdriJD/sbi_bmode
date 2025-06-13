@@ -84,6 +84,7 @@ run42	like run40 but with SNPE
 run43	run with synchrotron and config 16, with rtol=0.9
 run43b	run with synchrotron and config 16 with rtol=0.01
 run44	like run43 but after finding bug that was re-using dust sed for sync
+run45	like run44 but with more restrictive config (17)
 
 mcmc33  
 

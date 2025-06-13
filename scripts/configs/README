@@ -8,3 +8,4 @@ config13	more realistic gamma_beta_dust priors and true values
 config14	like 13 but Alens=0.4 and higher lmax
 config15	like 14 but with WMAP K and Planck 353.
 config16	like 15 but with synchrotron.
+config17	like 16 but restrict gamma_beta_sync and amp_beta_sync to avoid numerical issues in pyilc

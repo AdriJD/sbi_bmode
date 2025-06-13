@@ -538,7 +538,7 @@ def get_delta_beta_cl(amp, gamma, lmax, ell_0=1, ell_cutoff=1):
     '''
 
     ells = np.arange(lmax + 1)
-    ind_above = np.where(ells > ell_cutoff)[0]
+    ind_above = np.where(ells >= ell_cutoff)[0]
     cls = np.zeros(len(ells))
     cls[ind_above] = amp * (ells[ind_above] / ell_0) ** gamma
 

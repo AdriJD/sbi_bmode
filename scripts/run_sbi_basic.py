@@ -414,7 +414,7 @@ def main(odir, config, specdir, seed, n_train, n_samples, n_rounds, pyilcdir, us
             np.save(opj(odir, 'data.npy'), cmb_simulator.get_unnorm_data(x_obs))
         elif norm_simple:
             np.save(opj(odir, 'data_norm.npy'), x_obs)
-            np.save(opj(odir, 'data.npy'), uncompress_utils.normalize_simple(x_obs, data_mean, data_std))            
+            np.save(opj(odir, 'data.npy'), compress_utils.normalize_simple(x_obs, data_mean, data_std))            
             np.save(opj(odir, 'data_mean.npy'), data_mean)
             np.save(opj(odir, 'data_std.npy'), data_std)            
         else:
