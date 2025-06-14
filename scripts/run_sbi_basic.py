@@ -120,12 +120,61 @@ def simulate_for_sbi_mpi(simulator, proposal, param_names, num_sims, ndata, seed
 
     return thetas_full, sims_full
 
+def estimate_data_mean_and_std(n_norm, cmb_simulator, proposal, param_names, ndata,
+                               seed, comm, score_compress, mat_compress=None):
+    '''
+    Draw simulations and estimate mean and std of the data distribution.
+
+    Parameters
+    ----------
+    n_norm : int
+        Number of simulations to draw.
+    cmb_simulator : sim_utils.cmb_simulator instance.
+        Simulator instance.
+    proposal : any
+        Proposal distribution for parameters, must have `sample` method.
+    param_names : list of str
+        List if the parameters in same order as samples from the proposal.
+    ndata : int
+        Size of the data vector
+    seed : int, np.random._generator.Generator object
+        Seed or random number generator object.
+    comm : mpi4py.MPI.Intracomm object
+        MPI communicator.
+    score_compress : bool
+        Apply score compression.
+    mat_compress : (ntheta, ndata) array, optional
+        Apply this compression matrix to the data vectors.
+
+    Returns
+    -------
+    data_mean : (ndata) ndarray
+        Mean of data vector.
+    data_std : (ndata) ndarray
+        Standard deviations per element of data vector.
+    '''
+
+    _, x_norm = simulate_for_sbi_mpi(
+        cmb_simulator, proposal, param_names, n_norm, ndata,
+        rng_sims, comm, score_compress, mat_compress=mat_compress)
+    if comm.rank == 0:
+        data_mean = np.mean(np.asarray(x_norm), axis=0)
+        data_std = np.std(np.asarray(x_norm), axis=0)
+    else:
+        data_mean, data_std = None, None
+    data_mean = comm.bcast(data_mean, root=0)
+    data_std = comm.bcast(data_std, root=0)
+
+    return data_mean, data_std
+
 def main(odir, config, specdir, seed, n_train, n_samples, n_rounds, pyilcdir, use_dust_map,
          use_dbeta_map, deproj_dust, deproj_dbeta, fiducial_beta, fiducial_T_dust,         
          use_sync_map=False, use_dbeta_sync_map=False, deproj_sync=False, deproj_dbeta_sync=False,
          fiducial_beta_sync=None, no_norm=False, score_compress=False, embed=False, embed_num_layers=2,
          embed_num_hiddens=25, embed_num_output_fact=3, fmpe=False, e_moped=False, n_moped=None,
-         density_estimator_type='maf', coadd_equiv_crosses=True, apply_highpass_filter=True, n_test=None):
+         density_estimator_type='maf', coadd_equiv_crosses=True, apply_highpass_filter=True, n_test=None,
+         previous_seed_file=None, data_mean_file=None, data_std_file=None, previous_data_obs_file=None,
+         previous_data_file=None, previous_params_file=None):
     '''
     Run SBI.
 
@@ -211,8 +260,52 @@ def main(odir, config, specdir, seed, n_train, n_samples, n_rounds, pyilcdir, us
         Filter out signal modes below lmin in the simulations.
     n_test : int, optional
         Number of additional simulations written to disk for later testing.
+    previous_seed_file: str, optional
+        Path to .npy file containing seed(s) from previous run to which we are adding data.
+    data_mean_file : str, optional
+        Path to .npy file containing mean of data distribution used for previous run.
+    data_std_file : str, optional
+        Path to .npy file containing std of data distribution used for previous run.
+    previous_data_obs_file : str, optional
+        Path to .npy file containing previous (normalized) observed data vector.
+    previous_data_file : str, optional
+        Path to .npy file containing previous (normalized) data vectors.
+    previous_params_file : str, optional
+        Path to .npy file containing previous parameter vectors.
     '''
 
+    if previous_seed_file:
+        previous_seed = np.load(previous_seed_file)
+        if seed in previous_seed:
+            raise ValueError(f'Cannot re-use seeds: {previous_seed}, {seed}')        
+
+    if data_mean_file or data_std_file:
+        assert None not in (data_mean_file, data_std_file), 'Both mean and std files required'
+        if comm.rank == 0:
+            data_mean = np.load(data_mean_file)
+            data_std = np.load(data_std_file)
+        else:
+            data_mean, data_std = None, None
+        data_mean = comm.bcast(data_mean, root=0)
+        data_std = comm.bcast(data_std, root=0)        
+
+    if previous_data_obs_file:
+        if comm.rank == 0:
+            x_obs = np.load(previous_data_obs_file)
+        else:
+            x_obs = None
+        x_obs = comm.bcast(x_obs)
+
+    if previous_data_file or previous_params_file:
+        assert None not in (previous_data_file, previous_params_file), 'Both data and params required'
+        if comm.rank == 0:
+            # Only need this on root rank.
+            previous_data = np.load(previous_data_file)
+            previous_params = np.load(previous_params_file)
+            
+    if score_compress or e_moped:
+        raise ValueError('Not supported right now.')
+        
     if score_compress and e_moped:
         raise ValueError("Cannot have both score and e-MOPED compression.")
 
@@ -236,8 +329,9 @@ def main(odir, config, specdir, seed, n_train, n_samples, n_rounds, pyilcdir, us
 
     config['param_order'] = param_names # To save the order that we actually used.
 
-    print(f'{prior.mean=}')
-    print(f'{prior.stddev=}')
+    if comm.rank == 0:
+        print(f'{prior.mean=}')
+        print(f'{prior.stddev=}')
     mean_dict = {}
     for idx, name in enumerate(param_names):
         mean_dict[name] = float(prior.mean[idx])
@@ -290,56 +384,53 @@ def main(odir, config, specdir, seed, n_train, n_samples, n_rounds, pyilcdir, us
 
     if comm.rank == 0:
         print(f'{data_size=}')
-        
+
     if norm_simple:
         # Draw some simulations from the prior to find a normalization.
         # Ideally this would be done during the first round of inference
         # but easier for now to do here. We shouldn't need too many sims.
-        n_norm = 128
-        _, x_norm = simulate_for_sbi_mpi(
-            cmb_simulator, proposal, param_names, n_norm, data_size,
-            rng_sims, comm, score_compress, mat_compress=mat_compress)
-        if comm.rank == 0:
-            data_mean = np.mean(np.asarray(x_norm), axis=0)
-            data_std = np.std(np.asarray(x_norm), axis=0)
-        else:
-            data_mean, data_std = None, None
-        data_mean = comm.bcast(data_mean, root=0)
-        data_std = comm.bcast(data_std, root=0)
-
+        if data_mean_file is None:
+            n_norm = 144
+            data_mean, data_std = estimate_data_mean_and_std(
+                n_norm, cmb_simulator, proposal, param_names, data_size,
+                rng_sims, comm, score_compress, mat_compress=mat_compress)
+            
     # Define observations. Important that all ranks agree on this.
-    if comm.rank == 0:
-        x_obs = cmb_simulator.draw_data(
-            true_params['r_tensor'],
-            true_params['A_lens'],
-            true_params['A_d_BB'],
-            true_params['alpha_d_BB'],
-            true_params['beta_dust'],
-            rng_sims,
-            amp_beta_dust=true_params.get('amp_beta_dust'),
-            gamma_beta_dust=true_params.get('gamma_beta_dust'),
-            A_s_BB=true_params.get('A_s_BB'),
-            alpha_s_BB=true_params.get('alpha_s_BB'),
-            beta_sync=true_params.get('beta_sync'),
-            amp_beta_sync=true_params.get('amp_beta_sync'),
-            gamma_beta_sync=true_params.get('gamma_beta_sync'),
-            rho_ds=true_params.get('rho_ds'))
+    if previous_data_obs_file is None:
+        if comm.rank == 0:
+            x_obs = cmb_simulator.draw_data(
+                true_params['r_tensor'],
+                true_params['A_lens'],
+                true_params['A_d_BB'],
+                true_params['alpha_d_BB'],
+                true_params['beta_dust'],
+                rng_sims,
+                amp_beta_dust=true_params.get('amp_beta_dust'),
+                gamma_beta_dust=true_params.get('gamma_beta_dust'),
+                A_s_BB=true_params.get('A_s_BB'),
+                alpha_s_BB=true_params.get('alpha_s_BB'),
+                beta_sync=true_params.get('beta_sync'),
+                amp_beta_sync=true_params.get('amp_beta_sync'),
+                gamma_beta_sync=true_params.get('gamma_beta_sync'),
+                rho_ds=true_params.get('rho_ds'))
+        else:
+            x_obs = None
+        x_obs = comm.bcast(x_obs, root=0)
+
+        x_obs_full = x_obs.copy() # We always want to save the full data vector.
+
+        if e_moped:
+            x_obs = np.dot(mat_compress, x_obs)
+        if score_compress:
+            x_obs = np.asarray(cmb_simulator.score_compress(x_obs))
+        if norm_simple:
+            x_obs = compress_utils.normalize_simple(x_obs, data_mean, data_std)
     else:
-        x_obs = None
-    x_obs = comm.bcast(x_obs, root=0)
-
-    x_obs_full = x_obs.copy() # We always want to save the full data vector.
-
-    if e_moped:
-        x_obs = np.dot(mat_compress, x_obs)
-    if score_compress:
-        x_obs = np.asarray(cmb_simulator.score_compress(x_obs))
+        x_obs_full = None # We have loaded x_obs from disk, so no access to full vector.
+            
     if comm.rank == 0:
         print(f'{x_obs.size=}')
-
-    if norm_simple:
-        x_obs = compress_utils.normalize_simple(x_obs, data_mean, data_std)
-
+            
     if embed:
         embedding_net = FCEmbedding(
            input_dim=x_obs.size,
@@ -371,6 +462,10 @@ def main(odir, config, specdir, seed, n_train, n_samples, n_rounds, pyilcdir, us
             if norm_simple:
                 x = compress_utils.normalize_simple(x, torch.as_tensor(data_mean), torch.as_tensor(data_std))
 
+            if previous_params_file and ridx == 0:
+                x = torch.cat([torch.as_tensor(previous_data), x], dim=0)
+                theta = torch.cat([torch.as_tensor(previous_params), theta], dim=0)            
+            
             print(f'param draws : {theta}')
             print(f'data draws : {x}')
 
@@ -405,10 +500,14 @@ def main(odir, config, specdir, seed, n_train, n_samples, n_rounds, pyilcdir, us
                 x_test = compress_utils.normalize_simple(x_test, torch.as_tensor(data_mean), torch.as_tensor(data_std))
         
     if comm.rank == 0:
+        if previous_seed_file:
+            seed = np.append(previous_seed, seed)
+        np.save(opj(odir, 'random_seed.npy'), np.asarray(seed))
         with open(opj(odir, 'posterior.pkl'), "wb") as handle:
             pickle.dump(posterior, handle)
         script_utils.symlink_force(opj(odir, f'samples_round_{ridx:03d}.npy'), opj(odir, f'samples.npy'))
-        np.save(opj(odir, 'data_uncompressed.npy'), x_obs_full)
+        if x_obs_full is not None:
+            np.save(opj(odir, 'data_uncompressed.npy'), x_obs_full)
         if norm_params:
             np.save(opj(odir, 'data_norm.npy'), x_obs)
             np.save(opj(odir, 'data.npy'), cmb_simulator.get_unnorm_data(x_obs))
@@ -488,9 +587,23 @@ if __name__ == '__main__':
                         help='Do not coadd comp1 x comp2 and comp2 x comp1 cross spectra in data vector')
     parser.add_argument('--no-highpass-filter', action='store_true',
                         help='Do not remove signal below lmin in simulated maps.')
+
+    # Options for adding simulations to previous run.
+    parser.add_argument('--previous-data', type=str,
+                        help='Path to .npy file containing previous (normalized) data vectors.')
+    parser.add_argument('--previous-params', type=str,
+                        help='Path to .npy file containing previous parameter vectors.')
+    parser.add_argument('--data-obs', type=str,
+                        help='Path to .npy file containing previous (normalized) observed data vector.')
+    parser.add_argument('--data-mean', type=str,
+                        help='Path to .npy file containing mean of data distribution used for previous run.')
+    parser.add_argument('--data-std', type=str,
+                        help='Path to .npy file containing std of data distribution used for previous run.')    
+    parser.add_argument('--previous-seed-file', type=str,
+                        help='Path to .npy file containing seed integer(s)')
     
     args = parser.parse_args()
-
+    
     odir = args.odir
     if comm.rank == 0:
 
@@ -515,4 +628,8 @@ if __name__ == '__main__':
          embed_num_output_fact=args.embed_num_output_fact, fmpe=args.fmpe, e_moped=args.e_moped, n_moped=args.n_moped,
          density_estimator_type=args.density_estimator_type,
          coadd_equiv_crosses=not args.no_coadd_equiv_crosses,
-         apply_highpass_filter=not args.no_highpass_filter, n_test=args.n_test)
+         apply_highpass_filter=not args.no_highpass_filter, n_test=args.n_test,
+         previous_seed_file=args.previous_seed_file, data_mean_file=args.data_mean, data_std_file=args.data_std,
+         previous_data_obs_file=args.data_obs, previous_data_file=args.previous_data,
+         previous_params_file=args.previous_params)
+    

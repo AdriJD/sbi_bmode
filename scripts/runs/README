@@ -87,6 +87,8 @@ run44	like run43 but after finding bug that was re-using dust sed for sync
 run45	like run44 but with more restrictive config (17)
 run45b	like 45 but without dust, dbeta, sync, dbeta_sync maps but with deprojection
 
+run46	extra sims for run45
+
 mcmc33  
 
 checkcov00    check analytic cov with Monte-Carlo
