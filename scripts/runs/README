@@ -97,10 +97,15 @@ run36b_optuna Optuna run for run36b
 run36b_optuna_b Optuna run 2 for run36b, now 3 hyperparameters
 run36b_optuna_c like b but with mpi
 
+run41_optuna	optuna for run41
+
 run43_optuna	testing for run43
 run43_optuna_b	with logspace for learning rate, discrete power of 2 batch size and plots.
 
-run45_optuna
-run45b_optuna
+run45_optuna	: testing 
+run45_optuna_b	: including nuko_maf vs zuko_nsf
+run45_optuna_c	: including maf vs nsf
 
-run41_optuna	optuna for run41
+run45b_optuna : optuna for run45b
+
+run46_optuna  : optuna for run46, testing dropout, num_blocks, batch_norm

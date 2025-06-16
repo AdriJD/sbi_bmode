@@ -1,23 +1,22 @@
 #!/bin/bash
-##SBATCH --job-name=run45_optuna
-##SBATCH --nodes=1
-##SBATCH --ntasks-per-node=72
-##SBATCH --cpus-per-task=1
-##SBATCH --ntasks-per-core=1
-##SBATCH --time=00:10:00
+#SBATCH --job-name=run46_optuna
+#SBATCH --nodes=1
+#SBATCH --ntasks-per-node=18
+#SBATCH --cpus-per-task=4
+#SBATCH --ntasks-per-core=1
+#SBATCH --time=02:30:00
 
-#export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
-export OMP_NUM_THREADS=5
+export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
 
 module purge
 module load adri_gcc
 module load adri_base
 source $HOME/.pyenv/versions/sbi_bmode/bin/activate
 
-TAG=run45_optuna
+TAG=run46_optuna
 ANADIR=${HOME}/local/cca_project/scripts
 ODIR=${HOME}/project/so/20240521_sbi_bmode/${TAG}
-IDIR=${HOME}/project/so/20240521_sbi_bmode/run45
+IDIR=${HOME}/project/so/20240521_sbi_bmode/run46
 
 CONFIG=${IDIR}/config.yaml
 PARAMS=${IDIR}/param_draws_round_000.npy
@@ -29,4 +28,4 @@ export JAX_ENABLE_X64=True
 export JAX_DEBUG_NANS=True
 export JAX_PLATFORMS=cpu 
 
-srun -u -n 1 python ${ANADIR}/check_estimators.py --params ${PARAMS} --data ${DATA} --data-obs ${DATA_OBS} --odir ${ODIR} --config ${CONFIG} --journal ${JOURNAL}
+srun -u --cpu-bind=cores -c $SLURM_CPUS_PER_TASK python ${ANADIR}/check_estimators.py --params ${PARAMS} --data ${DATA} --data-obs ${DATA_OBS} --odir ${ODIR} --config ${CONFIG} --journal ${JOURNAL}

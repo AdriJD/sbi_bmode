@@ -75,7 +75,19 @@ def plot_training(opath, training_loss, validation_loss):
     plt.close(fig)
 
 def get_figure_from_ax(ax):
-    '''Extract the matplotlib figure instance from an axes or array of axes.'''
+    '''
+    Extract the matplotlib figure instance from an axis or array of axes.
+
+    Parameters
+    ----------
+    ax : matplotlib.Axes object or array
+        Axis or array of axes.
+
+    Returns
+    -------
+    fig : matplotlib.Figure object.
+        Figure corresponding to ax.
+    '''
 
     if isinstance(ax, np.ndarray):
         return ax.flat[0].get_figure()
@@ -184,7 +196,7 @@ def save_results(opath, study):
     results = sorted(results, key=lambda d: d['loss'])
     param_names = results[0]['params'].keys()
 
-    mat2save = np.zeros((len(results), 2 + len(param_names)))
+    mat2save = np.zeros((len(results), 2 + len(param_names)), dtype=object)
     mat2save[:,0] = [res['trial_number'] for res in results]
     mat2save[:,1] = [res['loss'] for res in results]
     for pidx, param_name in enumerate(param_names):
@@ -194,14 +206,23 @@ def save_results(opath, study):
     fmt = ['%4d', '%+22.15e']
     for param_name in param_names:
         header += '{:22s}\t'.format(param_name)
-        fmt.append('%-22d' if isinstance(results[0]['params'][param_name], int) else '%+22.15e')
+        param_value = results[0]['params'][param_name]
+        if isinstance(param_value, int):
+            fmt2use = '%-22d'
+        elif isinstance(param_value, float):
+            fmt2use = '%+22.15e'
+        else:
+            fmt2use = '%22s'
+        fmt.append(fmt2use)
+        #fmt.append('%-22d' if isinstance(results[0]['params'][param_name], int) else '%+22.15e')
 
     np.savetxt(opath, mat2save, fmt=fmt, delimiter='\t', header=header)
 
 def main(path_params, path_data, path_data_obs, odir, imgdir, config, n_samples,
          num_atoms=10, training_batch_size=200, learning_rate=0.0005, clip_max_norm=5.0,
          hidden_features=50, num_transforms=3,
-         embed=False, embed_num_layers=2, embed_num_hiddens=25,  density_estimator_type='maf'):
+         embed=False, embed_num_layers=2, embed_num_hiddens=25, density_estimator_type='maf',
+         num_blocks=2, dropout_probability=0., use_batch_norm=False):
     '''
     Run density estimation.
 
@@ -238,6 +259,9 @@ def main(path_params, path_data, path_data_obs, odir, imgdir, config, n_samples,
         Number of features in each hidden layer.
     density_estimator_type : str, optional
         String denoting density estimator for NPE.
+    num_blocks
+    dropout_probability
+    use_batch_norm
     '''
 
     theta = torch.as_tensor(np.load(path_params))
@@ -251,7 +275,9 @@ def main(path_params, path_data, path_data_obs, odir, imgdir, config, n_samples,
 
     neural_posterior = posterior_nn(model=density_estimator_type,
                                     hidden_features=hidden_features,
-                                    num_transforms=num_transforms)
+                                    num_transforms=num_transforms,
+                                    num_block=num_blocks, dropout_probability=dropout_probability,
+                                    use_batch_num=use_batch_norm)
     inference = SNPE(prior, density_estimator=neural_posterior)
 
     proposal = prior
@@ -259,12 +285,14 @@ def main(path_params, path_data, path_data_obs, odir, imgdir, config, n_samples,
         theta, x, proposal=proposal).train(
             num_atoms=num_atoms, training_batch_size=training_batch_size,
             learning_rate=learning_rate, clip_max_norm=clip_max_norm,
-            validation_fraction=0.1, stop_after_epochs=20,
-            max_num_epochs=1000, use_combined_loss=True,
+            #validation_fraction=0.1, stop_after_epochs=20,
+            validation_fraction=0.1, stop_after_epochs=30, # NOTE
+            max_num_epochs=300, use_combined_loss=True,
             show_train_summary=False)
 
     # Get validation loss for optuna.
-    best_validation_loss = inference.summary['best_validation_loss'][0]
+    #best_validation_loss = inference.summary['best_validation_loss'][0]
+    best_validation_loss = float(inference.summary['validation_loss'][-1])
 
     # Plot and save training.
     training_loss = np.asarray(inference.summary['training_loss'])
@@ -277,21 +305,19 @@ def main(path_params, path_data, path_data_obs, odir, imgdir, config, n_samples,
 
     # Build and plot posterior
     posterior = inference.build_posterior(density_estimator)
-    samples = np.asarray(posterior.sample((n_samples,), x=x_obs))
-
-    # Save samples.
-    with open(opj(odir, 'posterior.pkl'), "wb") as handle:
-        pickle.dump(posterior, handle)
-    np.save(opj(odir, f'samples.npy'), samples)
-
-    # Plot samples.
+    prior_samples = np.asarray(prior.sample((n_samples,)))    
     try:
-        with timeout(30): # Kill the sampling after 30 seconds.
-            prior_samples = np.asarray(prior.sample((n_samples,)))
+        with timeout(30): # Kill the sampling after 30 seconds.    
+            samples = np.asarray(posterior.sample((n_samples,), x=x_obs))
     except TimeoutException:
         print(f'{comm.rank=}: timeout sampling')
     else:
         plot_posterior(opj(imgdir, 'corner.png'), samples, prior_samples, config)
+        np.save(opj(odir, f'samples.npy'), samples)
+    
+    # Save samples.
+    with open(opj(odir, 'posterior.pkl'), "wb") as handle:
+        pickle.dump(posterior, handle)
 
     return best_validation_loss
 
@@ -324,12 +350,21 @@ def run_optuna(trial, path_params, path_data, path_data_obs, odir_base, config, 
 
     print(f'{comm.rank=} {trial.number=}')
 
-    training_batch_size = trial.suggest_int("training_batch_size", 5, 10) # Powers of 2.
+    #training_batch_size = trial.suggest_int("training_batch_size", 5, 10) # Powers of 2.
+    training_batch_size = 7
     learning_rate = trial.suggest_float("learning_rate", 1e-6, 1e-2, log=True)
-    clip_max_norm = trial.suggest_float("clip_max_norm", 1, 10)
+    #clip_max_norm = trial.suggest_float("clip_max_norm", 1, 10)
+    clip_max_norm = 6
     hidden_features = trial.suggest_int("hidden_features", 10, 100)
-    num_transforms = trial.suggest_int("num_transforms", 1, 10)
-
+    num_transforms = trial.suggest_int("num_transforms", 3, 13)
+    #density_estimator_type = trial.suggest_categorical(
+    #    "estimator_type", ['maf', 'nsf'])
+    num_blocks = trial.suggest_int("num_blocks", 1, 5)
+    dropout_probability = trial.suggest_float("dropout_probability",
+                                              0., 0.5, step=0.5)
+    use_batch_norm = trial.suggest_categorical(
+        "use_batch_norm", [False, True])
+    
     # Make output directory
     odir = opj(odir_base, f'trial_{trial.number:04d}')
     imgdir = opj(odir, 'img')
@@ -338,8 +373,10 @@ def run_optuna(trial, path_params, path_data, path_data_obs, odir_base, config, 
     loss = main(path_params, path_data, path_data_obs, odir, imgdir, config, n_samples,
                 learning_rate=learning_rate, training_batch_size=2 ** training_batch_size,
                 clip_max_norm=clip_max_norm, hidden_features=hidden_features,
-                num_transforms=num_transforms)
+                num_transforms=num_transforms, num_blocks=num_blocks,
+                dropout_probability=dropout_probability, use_batch_norm=use_batch_norm)
 
+    
     # Save trial parameters.
     trial_data = {'loss' : loss, 'trial_number' : trial.number, 'params' : trial.params}
     print(f'{comm.rank=}, {trial_data=}')
@@ -380,14 +417,12 @@ if __name__ == '__main__':
                                          args.odir, config, args.n_samples)
     sampler = optuna.samplers.TPESampler(multivariate=True)
     study = optuna.create_study(study_name='test_study', storage=storage, direction="minimize", load_if_exists=True)
-    study.optimize(objective, n_trials=10)
+    #study.optimize(objective, n_trials=8)
 
     comm.barrier()
     if comm.rank == 0:
 
         os.makedirs(opj(args.odir, 'img'), exist_ok=True)
-
-        save_results(opj(args.odir, 'img', 'results.txt'), study)
 
         ax = oplt.plot_optimization_history(study)
         fig = get_figure_from_ax(ax)
@@ -409,7 +444,11 @@ if __name__ == '__main__':
 
         ax = oplt.plot_contour(study)
         fig = get_figure_from_ax(ax)
-        fig.set_size_inches(12, 16)
+        fig.set_size_inches(18, 16)
         fig.set_constrained_layout(True)        
         fig.savefig(opj(args.odir, 'img', 'contour'), dpi=300)
         plt.close(fig)
+
+        save_results(opj(args.odir, 'img', 'results.txt'), study)
+
+        
