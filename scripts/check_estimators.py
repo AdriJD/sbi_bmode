@@ -221,8 +221,8 @@ def save_results(opath, study):
 def main(path_params, path_data, path_data_obs, odir, imgdir, config, n_samples,
          num_atoms=10, training_batch_size=200, learning_rate=0.0005, clip_max_norm=5.0,
          hidden_features=50, num_transforms=3,
-         embed=False, embed_num_layers=2, embed_num_hiddens=25, density_estimator_type='maf',
-         num_blocks=2, dropout_probability=0., use_batch_norm=False):
+         embed=False, embed_num_layers=2, embed_num_out=25, embed_num_hiddens=25, density_estimator_type='maf',
+         num_blocks=2, dropout_probability=0., use_batch_norm=False, e_moped=False):
     '''
     Run density estimation.
 
@@ -255,6 +255,8 @@ def main(path_params, path_data, path_data_obs, odir, imgdir, config, n_samples,
         Use an embedding network.
     embed_num_layers : int, optional
         Number of layers of embedding network
+    embed_num_out : int
+        Output dimension.
     embed_num_hiddens : int, optional
         Number of features in each hidden layer.
     density_estimator_type : str, optional
@@ -262,22 +264,41 @@ def main(path_params, path_data, path_data_obs, odir, imgdir, config, n_samples,
     num_blocks
     dropout_probability
     use_batch_norm
+    e_moped : bool, optional
     '''
 
     theta = torch.as_tensor(np.load(path_params))
     x = torch.as_tensor(np.load(path_data))
     x_obs = torch.as_tensor(np.load(path_data_obs))
 
+    if e_moped:
+        # Import to first cast to 64 bit to avoids nans in compression matrix.
+        mat_compress = compress_utils.get_e_moped_matrix(
+            x.numpy().astype(np.float64), theta.numpy().astype(np.float64))
+        x = torch.as_tensor(np.einsum('ij, aj -> ai', mat_compress, x.numpy()), dtype=torch.float32)
+        x_obs = torch.as_tensor(np.einsum('ij, j -> i', mat_compress, x_obs.numpy()), dtype=torch.float32)
+        np.save(opj(odir, f'mat_compress.npy'), mat_compress)
+        
     data_dict, fixed_params_dict, params_dict = script_utils.parse_config(config)
     prior_list, param_names = script_utils.get_prior(params_dict)
     prior = MultipleIndependent(prior_list)
     prior, num_parameters, prior_returns_numpy = process_prior(prior)
 
+    if embed:
+        embedding_net = FCEmbedding(
+           input_dim=np.asarray(x_obs).size, # .size on torch array does not behave like numpy.
+           output_dim=embed_num_out,
+           num_layers=embed_num_layers,
+           num_hiddens=embed_num_hiddens)
+    else:
+        embedding_net = torch.nn.Identity()
+        
     neural_posterior = posterior_nn(model=density_estimator_type,
                                     hidden_features=hidden_features,
                                     num_transforms=num_transforms,
                                     num_block=num_blocks, dropout_probability=dropout_probability,
-                                    use_batch_num=use_batch_norm)
+                                    use_batch_num=use_batch_norm,
+                                    embedding_net=embedding_net)
     inference = SNPE(prior, density_estimator=neural_posterior)
 
     proposal = prior
@@ -285,13 +306,12 @@ def main(path_params, path_data, path_data_obs, odir, imgdir, config, n_samples,
         theta, x, proposal=proposal).train(
             num_atoms=num_atoms, training_batch_size=training_batch_size,
             learning_rate=learning_rate, clip_max_norm=clip_max_norm,
-            #validation_fraction=0.1, stop_after_epochs=20,
-            validation_fraction=0.1, stop_after_epochs=30, # NOTE
-            max_num_epochs=300, use_combined_loss=True,
+            validation_fraction=0.1, stop_after_epochs=30,
+            #validation_fraction=0.1, stop_after_epochs=300,
+            max_num_epochs=1000, use_combined_loss=True,
             show_train_summary=False)
 
     # Get validation loss for optuna.
-    #best_validation_loss = inference.summary['best_validation_loss'][0]
     best_validation_loss = float(inference.summary['validation_loss'][-1])
 
     # Plot and save training.
@@ -351,7 +371,8 @@ def run_optuna(trial, path_params, path_data, path_data_obs, odir_base, config, 
     print(f'{comm.rank=} {trial.number=}')
 
     #training_batch_size = trial.suggest_int("training_batch_size", 5, 10) # Powers of 2.
-    training_batch_size = 7
+    #training_batch_size = 7
+    training_batch_size = 8 # NOTE
     learning_rate = trial.suggest_float("learning_rate", 1e-6, 1e-2, log=True)
     #clip_max_norm = trial.suggest_float("clip_max_norm", 1, 10)
     clip_max_norm = 6
@@ -359,11 +380,25 @@ def run_optuna(trial, path_params, path_data, path_data_obs, odir_base, config, 
     num_transforms = trial.suggest_int("num_transforms", 3, 13)
     #density_estimator_type = trial.suggest_categorical(
     #    "estimator_type", ['maf', 'nsf'])
-    num_blocks = trial.suggest_int("num_blocks", 1, 5)
-    dropout_probability = trial.suggest_float("dropout_probability",
-                                              0., 0.5, step=0.5)
-    use_batch_norm = trial.suggest_categorical(
-        "use_batch_norm", [False, True])
+    num_blocks = trial.suggest_int("num_blocks", 1, 7)
+    #dropout_probability = trial.suggest_float("dropout_probability",
+    #                                          0., 0.5, step=0.5)
+    dropout_probability = 0.0
+    
+    #use_batch_norm = trial.suggest_categorical(
+    #    "use_batch_norm", [False, True])
+    use_batch_norm = True
+
+    embed = False
+    #embed_num_layers = trial.suggest_int("embed_num_layers", 1, 5)
+    #embed_num_out = trial.suggest_int("embed_num_out", 7, 30)
+    #embed_num_hiddens = trial.suggest_int("embed_num_hiddens", 10, 50)
+
+    embed_num_layers = 2
+    embed_num_out = 25
+    embed_num_hiddens = 25
+
+    e_moped = False
     
     # Make output directory
     odir = opj(odir_base, f'trial_{trial.number:04d}')
@@ -374,7 +409,10 @@ def run_optuna(trial, path_params, path_data, path_data_obs, odir_base, config, 
                 learning_rate=learning_rate, training_batch_size=2 ** training_batch_size,
                 clip_max_norm=clip_max_norm, hidden_features=hidden_features,
                 num_transforms=num_transforms, num_blocks=num_blocks,
-                dropout_probability=dropout_probability, use_batch_norm=use_batch_norm)
+                dropout_probability=dropout_probability, use_batch_norm=use_batch_norm,
+                embed=embed,
+                embed_num_layers=embed_num_layers, embed_num_out=embed_num_out,
+                embed_num_hiddens=embed_num_hiddens, e_moped=e_moped)
 
     
     # Save trial parameters.
@@ -417,7 +455,7 @@ if __name__ == '__main__':
                                          args.odir, config, args.n_samples)
     sampler = optuna.samplers.TPESampler(multivariate=True)
     study = optuna.create_study(study_name='test_study', storage=storage, direction="minimize", load_if_exists=True)
-    #study.optimize(objective, n_trials=8)
+    study.optimize(objective, n_trials=8)
 
     comm.barrier()
     if comm.rank == 0:

@@ -86,8 +86,19 @@ run43b	run with synchrotron and config 16 with rtol=0.01
 run44	like run43 but after finding bug that was re-using dust sed for sync
 run45	like run44 but with more restrictive config (17)
 run45b	like 45 but without dust, dbeta, sync, dbeta_sync maps but with deprojection
+run45c	small run, like run45, just to get data vector with same seed as run49
+run45d	like run45 but only to create new test set
 
 run46	extra sims for run45
+run47	extra sims for run45
+run48	extra sims for run45
+
+run49	HILC run similar to run45
+run49b  New test set for run49
+run50   extra sims for run49
+
+run51	extra sims for run45
+run52	NILC run for config18
 
 mcmc33  
 
@@ -98,14 +109,31 @@ run36b_optuna_b Optuna run 2 for run36b, now 3 hyperparameters
 run36b_optuna_c like b but with mpi
 
 run41_optuna	optuna for run41
+run41_optuna_b	rerun with learning_rate, hidden_features, num_transforms, num_blocks
+run41_optuna_c	like run41_optuna_b but larger (1024) batch size
+run41_optuna_d	with embedding net
+run41_optuna_d	with e-moped and smaller batch size (256)
+run41_optuna_e	?? 
 
 run43_optuna	testing for run43
 run43_optuna_b	with logspace for learning rate, discrete power of 2 batch size and plots.
 
 run45_optuna	: testing 
-run45_optuna_b	: including nuko_maf vs zuko_nsf
+run45_optuna_b	: including zuko_maf vs zuko_nsf
 run45_optuna_c	: including maf vs nsf
 
 run45b_optuna : optuna for run45b
 
 run46_optuna  : optuna for run46, testing dropout, num_blocks, batch_norm
+run47_optuna  : optuna for run47, no dropout, batch_norm=True
+run47_optuna_b optuna for run47 with embedding
+run47_optuna_c same as b but with no early stopping
+
+run48_optuna : optuna for run48, same as run47_optuna
+run48_optuna_b : like run48 but with same data_obs seed as run49
+
+
+run49_optuna : optuna for run49
+run50_optuna : optuna for run50
+run51_optuna : optuna for run51
+run52_optuna : optuna from run52

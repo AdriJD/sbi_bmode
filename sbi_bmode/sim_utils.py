@@ -31,6 +31,8 @@ class CMBSimulator():
         Dictionary with parameter names and values that we keep fixed.
     pyilcdir: str
         Path to pyilc respository. Setting to None means NILC is not used.
+    wavelet_type : str, optonal
+        Type of wavelets. Note, use "TopHatHarmonic" for harmonic ILC.        
     use_dust_map: bool, optional
         Only relevant if using nilc (pyilc dir is not None). Whether
         to build map of dust and include it in auto- and cross-spectra in
@@ -78,9 +80,10 @@ class CMBSimulator():
         Filter out signal modes below lmin in the simulations.
     '''
 
-    def __init__(self, specdir, data_dict, fixed_params_dict, pyilcdir=None, use_dust_map=True,
-                 use_dbeta_map=False, use_sync_map=False, use_dbeta_sync_map=False,
-                 deproj_dust=False, deproj_dbeta=False, deproj_sync=False, deproj_dbeta_sync=False,
+    def __init__(self, specdir, data_dict, fixed_params_dict, pyilcdir=None,
+                 wavelet_type='GaussianNeedlets', use_dust_map=True, use_dbeta_map=False,
+                 use_sync_map=False, use_dbeta_sync_map=False, deproj_dust=False,
+                 deproj_dbeta=False, deproj_sync=False, deproj_dbeta_sync=False,
                  fiducial_beta=None, fiducial_T_dust=None, fiducial_beta_sync=None,
                  odir=None, norm_params=None, score_params=None,
                  coadd_equiv_crosses=True, apply_highpass_filter=True):
@@ -91,6 +94,7 @@ class CMBSimulator():
         self.nsplit = data_dict['nsplit']
         self.delta_ell = data_dict['delta_ell']
         self.pyilcdir = pyilcdir
+        self.wavelet_type = wavelet_type
         self.use_dust_map = use_dust_map
         self.use_dbeta_map = use_dbeta_map
         self.use_sync_map = use_sync_map
@@ -413,12 +417,13 @@ class CMBSimulator():
             nilc_maps = nilc_utils.get_nilc_maps(
                 self.pyilcdir, map_tmpdir, self.nsplit, self.nside, self.fiducial_beta,
                 self.fiducial_T_dust, self.freq_pivot_dust, self.freqs,
-                self.beam_fwhms, use_dust_map=self.use_dust_map, use_dbeta_map=self.use_dbeta_map,
-                use_sync_map=self.use_sync_map, use_dbeta_sync_map=self.use_dbeta_sync_map,
-                deproj_dust=self.deproj_dust, deproj_dbeta=self.deproj_dbeta,
-                deproj_sync=self.deproj_sync, deproj_dbeta_sync=self.deproj_dbeta_sync,
-                fiducial_beta_sync=self.fiducial_beta_sync, freq_pivot_sync=self.freq_pivot_sync,
-                output_dir=self.odir, remove_files=True, debug=False)
+                self.beam_fwhms, wavelet_type=self.wavelet_type, use_dust_map=self.use_dust_map,
+                use_dbeta_map=self.use_dbeta_map, use_sync_map=self.use_sync_map,
+                use_dbeta_sync_map=self.use_dbeta_sync_map, deproj_dust=self.deproj_dust,
+                deproj_dbeta=self.deproj_dbeta, deproj_sync=self.deproj_sync,
+                deproj_dbeta_sync=self.deproj_dbeta_sync, fiducial_beta_sync=self.fiducial_beta_sync,
+                freq_pivot_sync=self.freq_pivot_sync, output_dir=self.odir, remove_files=True,
+                debug=False)
 
             spectra = estimate_spectra_nilc(nilc_maps, self.minfo, self.ainfo)
 

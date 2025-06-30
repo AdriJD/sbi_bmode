@@ -36,10 +36,10 @@ def write_maps(B_maps, output_dir=None):
     return map_tmpdir
 
 def get_nilc_maps(pyilc_path, map_tmpdir, nsplit, nside, fiducial_beta, fiducial_T_dust, freq_pivot_dust, 
-                  central_freqs, beam_fwhms, use_dust_map=True, use_dbeta_map=False, use_sync_map=False,
-                  use_dbeta_sync_map=False, deproj_dust=False, deproj_dbeta=False, deproj_sync=False,
-                  deproj_dbeta_sync=False, fiducial_beta_sync=None, freq_pivot_sync=None, output_dir=None,
-                  remove_files=True, debug=False):
+                  central_freqs, beam_fwhms, wavelet_type='GaussianNeedlets', use_dust_map=True,
+                  use_dbeta_map=False, use_sync_map=False, use_dbeta_sync_map=False, deproj_dust=False,
+                  deproj_dbeta=False, deproj_sync=False, deproj_dbeta_sync=False, fiducial_beta_sync=None,
+                  freq_pivot_sync=None, output_dir=None, remove_files=True, debug=False):
     '''
     Run pyilc and return NILC map(s).
 
@@ -63,6 +63,8 @@ def get_nilc_maps(pyilc_path, map_tmpdir, nsplit, nside, fiducial_beta, fiducial
         List of floats representing frequencies in Hz.
     beam_fwhms : array-like
         List of floats representing beam FWHM.
+    wavelet_type : str, optonal
+        Type of wavelets. Note, use "TopHatHarmonic" for harmonic ILC.
     use_dust_map : Bool, optional
         Whether to produce dust map.
     use_dbeta_map : Bool, optional
@@ -87,7 +89,7 @@ def get_nilc_maps(pyilc_path, map_tmpdir, nsplit, nside, fiducial_beta, fiducial
         Directory in which to make temporary directory for NILC maps (if set to None,
         the default $TMPDIR will be used).
     remove_files : Bool, optional
-        Whether to remove files when they're no longer needed.
+        Whether to remove files when they're no longer needed.    
     debug : Bool, optional
         Set to True to print intermediate outputs from pyilc, False to suppress.
 
@@ -111,6 +113,10 @@ def get_nilc_maps(pyilc_path, map_tmpdir, nsplit, nside, fiducial_beta, fiducial
 
     # Convert to Ghz.
     central_freqs = [nu * 1e-9 for nu in central_freqs]
+
+    # Wavelet or HILC parameters.
+    if wavelet_type == 'TopHatHarmonic':
+        hilc_binsize = 15
     
     for split in range(nsplit):
 
@@ -122,13 +128,16 @@ def get_nilc_maps(pyilc_path, map_tmpdir, nsplit, nside, fiducial_beta, fiducial
         pyilc_input_params['output_prefix'] = f""
         pyilc_input_params['save_weights'] = "no"
         pyilc_input_params['ELLMAX'] = 3*nside-2
-        pyilc_input_params['N_scales'] = 4
-        pyilc_input_params['GN_FWHM_arcmin'] = [300., 120., 60.] 
-        pyilc_input_params['taper_width'] = 0
+        pyilc_input_params['wavelet_type'] = wavelet_type        
+        if wavelet_type == 'TopHatHarmonic':
+            pyilc_input_params['BinSize'] = hilc_binsize
+        else:
+            pyilc_input_params['N_scales'] = 4
+            pyilc_input_params['GN_FWHM_arcmin'] = [300., 120., 60.] 
+            pyilc_input_params['taper_width'] = 0
         pyilc_input_params['N_freqs'] = len(central_freqs)
         pyilc_input_params['freqs_delta_ghz'] = central_freqs
         pyilc_input_params['N_side'] = nside
-        pyilc_input_params['wavelet_type'] = "GaussianNeedlets"
         pyilc_input_params['bandpass_type'] = "DeltaBandpasses"
         pyilc_input_params['beam_type'] = "Gaussians"
         pyilc_input_params['beam_FWHM_arcmin'] = beam_fwhms

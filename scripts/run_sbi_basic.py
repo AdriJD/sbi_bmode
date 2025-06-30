@@ -156,7 +156,7 @@ def estimate_data_mean_and_std(n_norm, cmb_simulator, proposal, param_names, nda
 
     _, x_norm = simulate_for_sbi_mpi(
         cmb_simulator, proposal, param_names, n_norm, ndata,
-        rng_sims, comm, score_compress, mat_compress=mat_compress)
+        seed, comm, score_compress, mat_compress=mat_compress)
     if comm.rank == 0:
         data_mean = np.mean(np.asarray(x_norm), axis=0)
         data_std = np.std(np.asarray(x_norm), axis=0)
@@ -170,11 +170,12 @@ def estimate_data_mean_and_std(n_norm, cmb_simulator, proposal, param_names, nda
 def main(odir, config, specdir, seed, n_train, n_samples, n_rounds, pyilcdir, use_dust_map,
          use_dbeta_map, deproj_dust, deproj_dbeta, fiducial_beta, fiducial_T_dust,         
          use_sync_map=False, use_dbeta_sync_map=False, deproj_sync=False, deproj_dbeta_sync=False,
-         fiducial_beta_sync=None, no_norm=False, score_compress=False, embed=False, embed_num_layers=2,
-         embed_num_hiddens=25, embed_num_output_fact=3, fmpe=False, e_moped=False, n_moped=None,
-         density_estimator_type='maf', coadd_equiv_crosses=True, apply_highpass_filter=True, n_test=None,
-         previous_seed_file=None, data_mean_file=None, data_std_file=None, previous_data_obs_file=None,
-         previous_data_file=None, previous_params_file=None):
+         fiducial_beta_sync=None, wavelet_type='GaussianNeedlets', no_norm=False, score_compress=False,
+         embed=False, embed_num_layers=2, embed_num_hiddens=25, embed_num_output_fact=3, fmpe=False,
+         e_moped=False, n_moped=None, density_estimator_type='maf', coadd_equiv_crosses=True,
+         apply_highpass_filter=True, n_test=None, previous_seed_file=None, data_mean_file=None,
+         data_std_file=None, previous_data_obs_file=None, previous_data_file=None,
+         previous_params_file=None):
     '''
     Run SBI.
 
@@ -234,6 +235,8 @@ def main(odir, config, specdir, seed, n_train, n_samples, n_rounds, pyilcdir, us
         deproject first moment of synchrotron w.r.t. beta in CMB NILC map.
     fiducial_beta_sync: float, optional
         Use this value for beta_synchrotron when building nilc maps.
+    wavelet_type : str, optonal
+        Type of wavelets. Note, use "TopHatHarmonic" for harmonic ILC.
     no_norm : bool, optional
         Apply no normalization to the data vector.
     score_compress : bool, optional
@@ -354,10 +357,10 @@ def main(odir, config, specdir, seed, n_train, n_samples, n_rounds, pyilcdir, us
         score_params = None
 
     cmb_simulator = sim_utils.CMBSimulator(
-        specdir, data_dict, fixed_params_dict, pyilcdir=pyilcdir, use_dust_map=use_dust_map,
-        use_dbeta_map=use_dbeta_map, use_sync_map=use_sync_map, use_dbeta_sync_map=use_dbeta_sync_map,
-        deproj_dust=deproj_dust, deproj_dbeta=deproj_dbeta, deproj_sync=deproj_sync,
-        deproj_dbeta_sync=deproj_dbeta_sync, fiducial_beta=fiducial_beta,
+        specdir, data_dict, fixed_params_dict, pyilcdir=pyilcdir, wavelet_type=wavelet_type,
+        use_dust_map=use_dust_map, use_dbeta_map=use_dbeta_map, use_sync_map=use_sync_map,
+        use_dbeta_sync_map=use_dbeta_sync_map, deproj_dust=deproj_dust, deproj_dbeta=deproj_dbeta,
+        deproj_sync=deproj_sync, deproj_dbeta_sync=deproj_dbeta_sync, fiducial_beta=fiducial_beta,
         fiducial_T_dust=fiducial_T_dust, fiducial_beta_sync=fiducial_beta_sync, odir=odir,
         norm_params=norm_params, score_params=score_params,
         coadd_equiv_crosses=coadd_equiv_crosses)
@@ -451,7 +454,7 @@ def main(odir, config, specdir, seed, n_train, n_samples, n_rounds, pyilcdir, us
         neural_posterior = posterior_nn(model=density_estimator_type)
         inference = SNPE(prior, density_estimator=neural_posterior)
 
-    # Train the SNPE.
+    # Train the SNPE. Allow n_rounds = 0 to only produce a test set.
     for ridx in range(n_rounds):
         theta, x = simulate_for_sbi_mpi(
             cmb_simulator, proposal, param_names, n_train, data_size,
@@ -483,16 +486,16 @@ def main(odir, config, specdir, seed, n_train, n_samples, n_rounds, pyilcdir, us
                 ).train(show_train_summary=True, use_combined_loss=True)
 
             posterior = inference.build_posterior(density_estimator)
-            proposal = posterior.set_default_x(x_obs)
+            #proposal = posterior.set_default_x(x_obs) # Not needed I think.
             samples = posterior.sample((n_samples,), x=x_obs)
             np.save(opj(odir, f'samples_round_{ridx:03d}.npy'), samples)
 
         proposal = comm.bcast(proposal, root=0)
 
     if n_test is not None:
-        # We are using the proposal from the latest round for the test set.
+        # We are using the prior as proposal for the test set.
         theta_test, x_test = simulate_for_sbi_mpi(
-            cmb_simulator, proposal, param_names, n_test, data_size,
+            cmb_simulator, prior, param_names, n_test, data_size,
             rng_sims, comm, score_compress, mat_compress=mat_compress)
 
         if comm.rank == 0:
@@ -503,9 +506,12 @@ def main(odir, config, specdir, seed, n_train, n_samples, n_rounds, pyilcdir, us
         if previous_seed_file:
             seed = np.append(previous_seed, seed)
         np.save(opj(odir, 'random_seed.npy'), np.asarray(seed))
-        with open(opj(odir, 'posterior.pkl'), "wb") as handle:
-            pickle.dump(posterior, handle)
-        script_utils.symlink_force(opj(odir, f'samples_round_{ridx:03d}.npy'), opj(odir, f'samples.npy'))
+        if n_rounds > 0:
+            with open(opj(odir, 'posterior.pkl'), "wb") as handle:
+                pickle.dump(posterior, handle)
+            script_utils.symlink_force(opj(odir, f'samples_round_{ridx:03d}.npy'), opj(odir, f'samples.npy'))
+            np.save(opj(odir, 'training_loss.npy'), np.asarray(inference.summary['training_loss']))
+            np.save(opj(odir, 'validation_loss.npy'), np.asarray(inference.summary['validation_loss']))            
         if x_obs_full is not None:
             np.save(opj(odir, 'data_uncompressed.npy'), x_obs_full)
         if norm_params:
@@ -520,9 +526,6 @@ def main(odir, config, specdir, seed, n_train, n_samples, n_rounds, pyilcdir, us
             np.save(opj(odir, 'data.npy'), x_obs_full)
         with open(opj(odir, 'config.yaml'), "w") as handle:
             yaml.safe_dump(config, handle, sort_keys=False)
-        np.save(opj(odir, 'training_loss.npy'), np.asarray(inference.summary['training_loss']))
-        np.save(opj(odir, 'validation_loss.npy'), np.asarray(inference.summary['validation_loss']))
-
         if n_test is not None:
             np.save(opj(odir, 'param_draws_test.npy'), np.asarray(theta_test))
             np.save(opj(odir, 'data_draws_test.npy'), np.asarray(x_test))
@@ -538,6 +541,8 @@ if __name__ == '__main__':
 
     parser.add_argument('--pyilcdir', default=None, help="Path to pyilc repository. "\
                         "Set to None to use multifrequency PS instead of NILC PS.")
+    parser.add_argument('--wavelet-type', type=str, default="GaussianNeedlets",
+                        help='Type of wavelets. Note, use "TopHatHarmonic" for harmonic ILC.')
     parser.add_argument('--use_dbeta_map', action='store_true', help="Whether to build map of \
                         1st moment w.r.t. beta. Only relevant if usng NILC PS.")
     parser.add_argument('--deproj_dust', action='store_true', help="Whether to deproject dust \
@@ -622,7 +627,7 @@ if __name__ == '__main__':
          args.deproj_dust, args.deproj_dbeta, args.fiducial_beta, args.fiducial_T_dust,
          use_sync_map=args.use_sync_map, use_dbeta_sync_map=args.use_dbeta_sync_map,
          deproj_sync=args.deproj_sync, deproj_dbeta_sync=args.deproj_dbeta_sync,
-         fiducial_beta_sync=args.fiducial_beta_sync,         
+         fiducial_beta_sync=args.fiducial_beta_sync, wavelet_type=args.wavelet_type,
          no_norm=args.no_norm, score_compress=args.score_compress, embed=args.embed,
          embed_num_layers=args.embed_num_layers, embed_num_hiddens=args.embed_num_hiddens,
          embed_num_output_fact=args.embed_num_output_fact, fmpe=args.fmpe, e_moped=args.e_moped, n_moped=args.n_moped,
