@@ -99,6 +99,7 @@ run50   extra sims for run49
 
 run51	extra sims for run45
 run52	NILC run for config18
+run53	NILC run for config19
 
 mcmc33  
 
@@ -136,4 +137,6 @@ run48_optuna_b : like run48 but with same data_obs seed as run49
 run49_optuna : optuna for run49
 run50_optuna : optuna for run50
 run51_optuna : optuna for run51
-run52_optuna : optuna from run52
+run52_optuna : optuna for run52
+run52_optuna_b : optuna for run52, but only targetting r and Alens
+run53_optuna : optuna for run53

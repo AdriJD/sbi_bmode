@@ -256,14 +256,58 @@ def bin_spectrum(spec, ells, bins, lmin, lmax, use_jax=False):
         
     return out
 
+def get_cross_sed(freqs, freq1_pivot, freq1_pivot, get_sed1, get_sed2):
+    '''
+    Compute frequency-dependent part of cross-spectra in CMB-reference temperature units
+    for specified SED(s).
+    
+    Parameters
+    ----------
+    freqs : (nfreq) array
+        Effective frequencies of bands in Hz.
+    freq1_pivot : float
+        Frequency pivot scale in Hz for SED used for first frequency.
+    freq2_pivot : float
+        Frequency pivot scale in Hz for SED used for second frequency.
+    get_sed1 : callable
+        SED for first frequency: callable that takes frequency in Hz as input.
+    get_sed2 : callable
+        SED for second frequency: callable that takes frequency in Hz as input.
+    
+    Returns
+    -------
+    out : (nfreq, nfreq) array
+        Frequency depdendent part of cross spectra.
+    '''
+    
+    nfreq = len(freqs)
+    out = jnp.zeros((nfreq, nfreq))
+
+    g0_squared_factor =  get_g_fact(freq1_pivot) * get_g_fact(freq2_pivot)
+    
+    for fidx1 in range(nfreq):
+        
+        f1_factor = get_sed1(freqs[fidx1])
+        g1_factor = get_g_fact(freqs[fidx1])
+        
+        for fidx2 in range(nfreq):
+        
+            f2_factor = get_sed2(freqs[fidx2])
+            g2_factor = get_g_fact(freqs[fidx2])
+
+            out = out.at[fidx1,fidx2].set(
+                jnp.sqrt(f1_factor * f2_factor) * g1_factor * g2_factor / (g0_squared_factor))
+            
+    return out
+
 def get_dust_spectra(amp, alpha, lmax, freqs, beta, temp, freq_pivot):
     '''
-    Compute dust cross-spectra in CMB temperature.
+    Compute dust cross-spectra in CMB-reference temperature units.
     
     Parameters
     ----------
     amp : float
-        Amplitude
+        Amplitude of dust power spectrum.
     alpha : float
         Multipole power law index.
     lmax : int
@@ -282,32 +326,114 @@ def get_dust_spectra(amp, alpha, lmax, freqs, beta, temp, freq_pivot):
     out : (nfreq, nfreq, lmax + 1) array
         Cross spectra.
     '''
-    
+
+    nfreq = len(freqs)
+     
+    out = jnp.zeros((nfreq, nfreq, lmax+1))
+    out = out.at[:].set(amp * get_ell_shape(lmax, alpha)[jnp.newaxis,jnp.newaxis,:])
+
+    get_sed1 = lambda freq: get_sed_dust(freq, beta, temp, freq_pivot)
+    get_sed2 = get_sed1
+
+    out = out.at[:].multiply(get_cross_sed(freqs, freq_pivot, freq_pivot, get_sed1, get_sed2))
+
+    return out
+
+def get_sync_spectra(amp, alpha, lmax, freqs, beta, freq_pivot):
+    '''
+    Compute synchrotron cross-spectra in CMB-reference temperature units.
+
+    Parameters
+    ----------
+    amp : float
+        Amplitude of synchrotron power spectrum.
+    alpha : float
+        Multipole power law index.
+    lmax : int
+        Maximum multipole.
+    freqs : float
+        Effective frequency of bands in Hz
+    beta : float
+        Synchrotron frequency spectral index.
+    freq_pivot : float
+        Frequency pivot scale.
+            
+    Returns
+    -------
+    out : (nfreq, nfreq, lmax + 1) array
+        Cross spectra.
+    '''
+
     nfreq = len(freqs)
     
     out = jnp.zeros((nfreq, nfreq, lmax+1))
-    out = out.at[:].set(get_ell_shape(lmax, alpha)[jnp.newaxis,:])
+    out = out.at[:].set(amp * get_ell_shape(lmax, alpha)[jnp.newaxis,jnp.newaxis,:])
 
-    g0_factor =  get_g_fact(freq_pivot)
-    
-    for fidx1 in range(nfreq):
-        
-        f1_factor = get_sed_dust(freqs[fidx1], beta, temp, freq_pivot)
-        g1_factor = get_g_fact(freqs[fidx1])
-        
-        for fidx2 in range(nfreq):
-        
-            f2_factor = get_sed_dust(freqs[fidx2], beta, temp, freq_pivot)
-            g2_factor = get_g_fact(freqs[fidx2])
+    get_sed1 = lambda freq: get_sed_sync(freq, beta, freq_pivot)
+    get_sed2 = get_sed1
 
-            out = out.at[fidx1,fidx2].multiply(amp * jnp.sqrt(f1_factor * f2_factor) \
-                                               * g1_factor * g2_factor / (g0_factor ** 2))
-            
+    out = out.at[:].multiply(get_cross_sed(freqs, freq_pivot, freq_pivot, get_sed1, get_sed2))
+
     return out
 
+def get_dust_sync_cross_spectra(rho_ds, amp_dust, alpha_dust, amp_sync, alpha_sync, lmax,
+                                freqs, beta_dust, temp, beta_sync, freq_pivot_dust, freq_pivot_sync):
+    '''
+    Compute dust x synchrotron cross-spectra in CMB-reference temperature units.
+
+    Parameters
+    ----------
+    rho_ds : float
+       Cross correlation coefficient of dust and synchrotron angular power spectra.
+    amp_dust : float
+        Amplitude of dust power spectrum.
+    alpha_dust : float
+        Multipole power law index for dust SED.
+    amp_sync : float
+        Amplitude of synchrotron power spectrum.
+    alpha_sync : float
+        Multipole power law index for synchrotron SED.
+    lmax : int
+        Maximum multipole.
+    freqs : float
+        Effective frequency of bands in Hz
+    beta_dust : float
+        Dust frequency spectral index.
+    temp : float
+        Dust temperature.
+    beta_sync : float
+        Synchrotron frequency spectra index.
+    freq_pivot_dust : float
+        Frequency pivot scale for dust SED.
+    freq_pivot_sync : float
+        Frequency pivot scale for synchrotron SED.
+            
+    Returns
+    -------
+    out : (nfreq, nfreq, lmax + 1) array
+        Cross spectra: d x s + s x d.
+    '''
+
+    nfreq = len(freqs)
+
+    out = jnp.zeros((nfreq, nfreq, lmax+1))
+    out = out.at[:].set(
+        rho_ds * jnp.sqrt(amp_dust * amp_sync * get_ell_shape(lmax, alpha_dust) \
+                          * get_ell_shape(lmax, alpha_sync))[jnp.newaxis,jnp.newaxis,:])
+
+    get_sed1 = lambda freq: get_sed_dust(freq, beta_dust, temp, freq_pivot_dust)
+    get_sed2 = lambda freq: get_sed_sync(freq, beta_sync, freq_pivot_sync)
+
+    cross_sed_matrix = get_cross_sed(
+        freqs, freq_pivot_dust, freq_pivot_sync, get_sed1, get_sed2)
+    cross_sed_matrix = cross_sed_matrix.at[:,:].add(jnp.transpose(cross_sed_matrix))
+    out = out.at[:].multiply(cross_sed_matrix)
+
+    return out
+ 
 def apply_beam_to_freq_cov(cov_ell, beams):
     '''
-    Apply per-frequency beams to a nfreq x nfreq covariance matrix.
+    Apply per-frequency beams to an nfreq x nfreq covariance matrix.
 
     Parameters
     ----------
@@ -315,70 +441,14 @@ def apply_beam_to_freq_cov(cov_ell, beams):
         Covariance matrix.
     beams : (nfreq, lmax + 1) array
         Beams per frequency.
+
+    Returns
+    -------
+    cov_ell : (nfreq, nfreq, lmax + 1) array
+        Covariance matrix with beam applied.
     '''
 
     nfreq = beams.shape[0]
     beam_mat = jnp.eye(nfreq)[:,:,jnp.newaxis] * beams
 
     return jnp.einsum('abl, bcl, cdl -> adl', beam_mat, cov_ell, beam_mat)
-
-def get_sync_spectra(amp, alpha, lmax, freq, beta, freq_pivot):
-    '''
-
-    Parameters
-    ----------
-    amp : float
-        Amplitude
-    alpha : float
-        Mulitpole power law index.
-    freq : float
-        Effective frequency of band.
-    beta : 
-    freq_pivot : float
-        Frequency pivot scale.
-            
-    Returns
-    -------
-    out : (nell) array
-    '''
-
-    f_factor = get_sed_sync(freq, beta, freq_pivot)
-    
-    #out = jnp.zeros((lmax + 1))
-    #ells = jnp.arange(2, lmax + 1)
-
-    prefactor = amp * f_factor
-
-    out = get_ell_shape(lmax, alpha) * prefactor
-    
-    return out
-
-def get_fg_spectra(A_d_EE, alpha_d_EE, alpha_d_BB, beta_dust, nu0_dust, temp_dust,
-                   A_s_EE, alpha_s_EE, alpha_s_BB, beta_sync, nu0_sync,
-                   freq, lmax):
-    '''
-    Compute dust and synchrotron Cls. 
-
-    Returns
-    -------
-    out : (npol, npol, nell)
-        Sum of dust and synchrotron spectra.
-    '''
-    
-    #out = jnp.zeros((2, 2, lmax + 1))
-    out = np.zeros((2, 2, lmax + 1))    
-
-    g_factor = get_g_fact(freq, cmb_temp)
-
-    out = out.at[0,0].set(get_dust_spectra(A_d_EE, alpha_d_EE, freq, beta_dust,
-                                           temp_dust, nu0_dust, g_fact, lmax))
-    out = out.at[1,1].set(get_dust_spectra(A_d_BB, alpha_d_BB, freq, beta_dust,
-                                           temp_dust, nu0_dust, g_fact, lmax))
-
-    out = out.at[0,0].add(get_sync_spectra(A_s_EE, alpha_s_EE, freq, beta_sync,
-                                           nu0_sync, g_fact, lmax))
-    out = out.at[1,1].add(get_sync_spectra(A_s_BB, alpha_s_BB, freq, beta_sync,
-                                           nu0_sync, g_fact, lmax))
-    out = out.at[:].multiply(g_factor ** 2)
-    
-    return out

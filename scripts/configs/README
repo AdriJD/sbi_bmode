@@ -10,3 +10,4 @@ config15	like 14 but with WMAP K and Planck 353.
 config16	like 15 but with synchrotron.
 config17	like 16 but restrict gamma_beta_sync and amp_beta_sync to avoid numerical issues in pyilc
 config18	much more restrictive prior compared to 17
+config19	same as 18 but with lmin = 10

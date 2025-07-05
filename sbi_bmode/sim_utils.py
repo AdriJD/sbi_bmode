@@ -293,7 +293,8 @@ class CMBSimulator():
         else:
             raise ValueError(f'{fstr=} not recognized')
         
-    def get_signal_spectra(self, r_tensor, A_lens, A_d_BB, alpha_d_BB, beta_dust):
+    def get_signal_spectra(self, r_tensor, A_lens, A_d_BB, alpha_d_BB, beta_dust,
+                           A_s_BB=None, alpha_s_BB=None, beta_sync=None, rho_ds=None):
         '''
         Generate binned signal frequency cross spectra.
 
@@ -304,6 +305,19 @@ class CMBSimulator():
         A_lens : float
             A_lens parameter.
         A_d_BB : float
+            Amplitude of dust power spectrum.
+        alpha_d_BB : float
+            Power law index of dust power spectrum.
+        beta_dust : float
+            Power law index of dust SED.
+        A_s_BB : float, optional
+            Amplitude of synchrotron power spectrum.
+        alpha_s_BB : float, optional
+            Power law index of synchrotron power spectrum.
+        beta_dust : float, optonal
+            Power law index of synchrtron SED.
+        rho_ds : float, optional
+            Cross correlation coefficient of dust and synchrotron angular power spectra.
 
         Returns
         -------
@@ -315,6 +329,16 @@ class CMBSimulator():
             A_d_BB, alpha_d_BB, self.lmax, self.freqs, beta_dust, self.temp_dust,
             self.freq_pivot_dust)
 
+        if A_s_BB is not None:
+            cov_ell = cov_ell[:].add(spectra_utils.spectra_utils.get_sync_spectra(
+                A_s_BB, alpha_s_BB, self.lmax, self.freqs, beta_sync, self.freq_pivot_sync))
+
+        if rho_ds is not None:
+            cov_ell = cov_ell[:].add(spectra_utils.get_dust_sync_cross_spectra(
+                rho_ds, A_d_BB, alpha_d_BB, A_s_BB, alpha_s_BB, self.lmax, self.freqs,
+                beta_dust, self.temp_dust, beta_sync, self.freq_pivot_dust,
+                self.freq_pivot_sync))
+        
         # Only adding the BB part because `get_dust_spectra` only produces BB.
         cov_ell = cov_ell.at[:].add(spectra_utils.get_combined_cmb_spectrum(
             r_tensor, A_lens, self.cov_scalar_ell, self.cov_tensor_ell)[1,1])
@@ -329,6 +353,12 @@ class CMBSimulator():
 
     def get_noise_spectra(self, use_jax=False):
         '''
+        Generate binned noise frequency cross spectra.
+        
+        Parameters
+        ----------
+        use_jax : bool, optional
+            If set, use JAX backend.
 
         Returns
         -------

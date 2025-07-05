@@ -94,7 +94,7 @@ def get_figure_from_ax(ax):
     else:
         return ax.get_figure()
 
-def plot_posterior(opath, samples, prior_samples, config):
+def plot_posterior(opath, samples, prior_samples, config, cosmo_only=False):
     '''
     Plot corner plot of output posterior.
 
@@ -108,26 +108,41 @@ def plot_posterior(opath, samples, prior_samples, config):
         Prior samples.
     config : dict
         Dictionary with "data", "fixed_params" and "params" keys.
+    cosmo_only : bool, optional
+        If set, assume only `r` and `A_lens` have been estimated.
     '''
 
-    param_label_dict = {'r_tensor' : r'$r$',
-                        'A_lens' : r'$A_{\mathrm{lens}}$',
-                        'A_d_BB' : r'$A_{\mathrm{d}}$',
-                        'alpha_d_BB' : r'$\alpha_{\mathrm{d}}$',
-                        'beta_dust' : r'$\beta_{\mathrm{d}}$',
-                        'amp_beta_dust' : r'$B_{\mathrm{d}}$',
-                        'gamma_beta_dust' : r'$\gamma_{\mathrm{d}}$',
-                        'A_s_BB' : r'$A_{\mathrm{s}}$',
-                        'alpha_s_BB' : r'$\alpha_{\mathrm{s}}$',
-                        'beta_sync' : r'$\beta_{\mathrm{s}}$',
-                        'amp_beta_sync' : r'$B_{\mathrm{s}}$',
-                        'gamma_beta_sync' : r'$\gamma_{\mathrm{s}}$',
-                        'rho_ds' : r'$\rho_{\mathrm{ds}}$'}
+    if cosmo_only:
+        param_label_dict = {'r_tensor' : r'$r$',
+                            'A_lens' : r'$A_{\mathrm{lens}}$'}
+    else:
+        param_label_dict = {'r_tensor' : r'$r$',
+                            'A_lens' : r'$A_{\mathrm{lens}}$',
+                            'A_d_BB' : r'$A_{\mathrm{d}}$',
+                            'alpha_d_BB' : r'$\alpha_{\mathrm{d}}$',
+                            'beta_dust' : r'$\beta_{\mathrm{d}}$',
+                            'amp_beta_dust' : r'$B_{\mathrm{d}}$',
+                            'gamma_beta_dust' : r'$\gamma_{\mathrm{d}}$',
+                            'A_s_BB' : r'$A_{\mathrm{s}}$',
+                            'alpha_s_BB' : r'$\alpha_{\mathrm{s}}$',
+                            'beta_sync' : r'$\beta_{\mathrm{s}}$',
+                            'amp_beta_sync' : r'$B_{\mathrm{s}}$',
+                            'gamma_beta_sync' : r'$\gamma_{\mathrm{s}}$',
+                            'rho_ds' : r'$\rho_{\mathrm{ds}}$'}
 
     data_dict, fixed_params_dict, params_dict = script_utils.parse_config(config)
     prior, param_names = script_utils.get_prior(params_dict)
+    
+    if cosmo_only:
+        prior = prior[0:2]
+        param_names = param_names[0:2]
+    
     param_labels = [param_label_dict[p] for p in param_names]
     param_truths = script_utils.get_true_params(params_dict)
+
+    if cosmo_only:
+        param_truths = {'r_tensor' : param_truths['r_tensor'], 'A_lens' : param_truths['A_lens']}
+    
     param_labels_g = [l[1:-1] for l in param_labels] # getdist will put in $.
 
     param_limits = script_utils.get_param_limits(prior, param_names)
@@ -222,7 +237,7 @@ def main(path_params, path_data, path_data_obs, odir, imgdir, config, n_samples,
          num_atoms=10, training_batch_size=200, learning_rate=0.0005, clip_max_norm=5.0,
          hidden_features=50, num_transforms=3,
          embed=False, embed_num_layers=2, embed_num_out=25, embed_num_hiddens=25, density_estimator_type='maf',
-         num_blocks=2, dropout_probability=0., use_batch_norm=False, e_moped=False):
+         num_blocks=2, dropout_probability=0., use_batch_norm=False, e_moped=False, cosmo_only=False):
     '''
     Run density estimation.
 
@@ -265,9 +280,15 @@ def main(path_params, path_data, path_data_obs, odir, imgdir, config, n_samples,
     dropout_probability
     use_batch_norm
     e_moped : bool, optional
+    cosmo_only : bool, optional
+        If set, assume only `r` and `A_lens` have been estimated.
     '''
 
     theta = torch.as_tensor(np.load(path_params))
+
+    if cosmo_only:
+        theta = theta[:,:2]
+    
     x = torch.as_tensor(np.load(path_data))
     x_obs = torch.as_tensor(np.load(path_data_obs))
 
@@ -281,6 +302,11 @@ def main(path_params, path_data, path_data_obs, odir, imgdir, config, n_samples,
         
     data_dict, fixed_params_dict, params_dict = script_utils.parse_config(config)
     prior_list, param_names = script_utils.get_prior(params_dict)
+
+    if cosmo_only:
+        prior_list = prior_list[:2]
+        param_names = param_names[:2]
+    
     prior = MultipleIndependent(prior_list)
     prior, num_parameters, prior_returns_numpy = process_prior(prior)
 
@@ -332,7 +358,8 @@ def main(path_params, path_data, path_data_obs, odir, imgdir, config, n_samples,
     except TimeoutException:
         print(f'{comm.rank=}: timeout sampling')
     else:
-        plot_posterior(opj(imgdir, 'corner.png'), samples, prior_samples, config)
+        plot_posterior(
+            opj(imgdir, 'corner.png'), samples, prior_samples, config, cosmo_only=cosmo_only)
         np.save(opj(odir, f'samples.npy'), samples)
     
     # Save samples.

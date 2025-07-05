@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 
 opj = os.path.join
 
-idir = '/u/adriaand/project/so/20240521_sbi_bmode/run45c'
+idir = '/u/adriaand/project/so/20240521_sbi_bmode/run53'
 imgdir = opj(idir, 'img')
 
 os.makedirs(imgdir, exist_ok=True)

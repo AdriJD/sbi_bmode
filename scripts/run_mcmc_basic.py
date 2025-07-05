@@ -105,6 +105,10 @@ def main(odir, config, specdir, data_file, seed, n_samples, n_chains):
     
     # Invert matrix
     icov = jnp.asarray(mat_utils.matpow(np.asarray(cov), -1))
+
+
+
+
     
     # Init sampler
     key = jax.random.key(seed)
