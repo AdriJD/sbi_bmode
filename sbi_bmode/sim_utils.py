@@ -324,17 +324,17 @@ class CMBSimulator():
         cov_bin : (nfreq, nfreq, nbin) array
             Signal frequency cross spectra.
         '''
-
+        
         cov_ell = spectra_utils.get_dust_spectra(
             A_d_BB, alpha_d_BB, self.lmax, self.freqs, beta_dust, self.temp_dust,
             self.freq_pivot_dust)
 
         if A_s_BB is not None:
-            cov_ell = cov_ell[:].add(spectra_utils.spectra_utils.get_sync_spectra(
+            cov_ell = cov_ell.at[:].add(spectra_utils.get_sync_spectra(
                 A_s_BB, alpha_s_BB, self.lmax, self.freqs, beta_sync, self.freq_pivot_sync))
 
         if rho_ds is not None:
-            cov_ell = cov_ell[:].add(spectra_utils.get_dust_sync_cross_spectra(
+            cov_ell = cov_ell.at[:].add(spectra_utils.get_dust_sync_cross_spectra(
                 rho_ds, A_d_BB, alpha_d_BB, A_s_BB, alpha_s_BB, self.lmax, self.freqs,
                 beta_dust, self.temp_dust, beta_sync, self.freq_pivot_dust,
                 self.freq_pivot_sync))
@@ -1108,7 +1108,7 @@ def get_coadd_sels(nsplits, ncomps):
     pairs = [tuple(sorted((cidx1[i], cidx2[i]))) for i in range(ntri)]
     unique_combs = sorted(set(pairs))
 
-    # List of length len(unique_combs) where each elements is another list of indices.
+    # List of length len(unique_combs) where each element is another list of indices.
     sels_to_coadd = []
     for comb in unique_combs:
         sel = [i for i in range(ntri) if tuple(sorted((cidx1[i], cidx2[i]))) == comb]

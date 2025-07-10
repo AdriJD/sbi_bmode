@@ -256,7 +256,7 @@ def bin_spectrum(spec, ells, bins, lmin, lmax, use_jax=False):
         
     return out
 
-def get_cross_sed(freqs, freq1_pivot, freq1_pivot, get_sed1, get_sed2):
+def get_cross_sed(freqs, freq1_pivot, freq2_pivot, get_sed1, get_sed2):
     '''
     Compute frequency-dependent part of cross-spectra in CMB-reference temperature units
     for specified SED(s).
@@ -335,7 +335,8 @@ def get_dust_spectra(amp, alpha, lmax, freqs, beta, temp, freq_pivot):
     get_sed1 = lambda freq: get_sed_dust(freq, beta, temp, freq_pivot)
     get_sed2 = get_sed1
 
-    out = out.at[:].multiply(get_cross_sed(freqs, freq_pivot, freq_pivot, get_sed1, get_sed2))
+    out = out.at[:].multiply(
+        get_cross_sed(freqs, freq_pivot, freq_pivot, get_sed1, get_sed2)[:,:,jnp.newaxis])
 
     return out
 
@@ -372,7 +373,8 @@ def get_sync_spectra(amp, alpha, lmax, freqs, beta, freq_pivot):
     get_sed1 = lambda freq: get_sed_sync(freq, beta, freq_pivot)
     get_sed2 = get_sed1
 
-    out = out.at[:].multiply(get_cross_sed(freqs, freq_pivot, freq_pivot, get_sed1, get_sed2))
+    out = out.at[:].multiply(
+        get_cross_sed(freqs, freq_pivot, freq_pivot, get_sed1, get_sed2)[:,:,jnp.newaxis])
 
     return out
 
@@ -427,7 +429,7 @@ def get_dust_sync_cross_spectra(rho_ds, amp_dust, alpha_dust, amp_sync, alpha_sy
     cross_sed_matrix = get_cross_sed(
         freqs, freq_pivot_dust, freq_pivot_sync, get_sed1, get_sed2)
     cross_sed_matrix = cross_sed_matrix.at[:,:].add(jnp.transpose(cross_sed_matrix))
-    out = out.at[:].multiply(cross_sed_matrix)
+    out = out.at[:].multiply(cross_sed_matrix[:,:,jnp.newaxis])
 
     return out
  

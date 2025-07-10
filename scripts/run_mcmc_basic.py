@@ -5,13 +5,12 @@ import argparse
 
 import jax
 import jax.numpy as jnp
-
+from jax.scipy.special import logit, expit
+import blackjax
 import matplotlib.pyplot as plt
 import numpy as np
 from pixell import curvedsky
 from optweight import mat_utils
-from mclmc.sampler import Sampler
-from mclmc.boundary import Boundary
 
 from sbi_bmode import (spectra_utils, sim_utils, so_utils, likelihood_utils,
                        script_utils)
@@ -33,29 +32,30 @@ def get_prior(params_dict):
         Callable that return the logprior.
     param_names : list of str
         List of parameter names in same order as prior.
-    bounds : list of tuples
-        List with (min, max) per param.
+    transforms : dict
+        Dictionary containing a transformation instance per parameter.
     '''
     
     prior = []
     param_names = []
-    bounds = []
+    transforms = {}
     for param, prior_dict in params_dict.items():
     
         if prior_dict['prior_type'].lower() == 'normal':
             prior.append(likelihood_utils.Normal(
                 *prior_dict['prior_params']))
-            bounds.append((None, None))
+            transforms[param] = likelihood_utils.UnityTransform()
             
         elif prior_dict['prior_type'].lower() == 'halfnormal':
             prior.append(likelihood_utils.HalfNormal(
                 *prior_dict['prior_params']))
-            bounds.append((0., None))
+            transforms[param] = likelihood_utils.LogTransform(0.)
+            
         elif prior_dict['prior_type'].lower() == 'truncatednormal':
             prior.append(likelihood_utils.TruncatedNormal(
                 *prior_dict['prior_params']))
-            bounds.append((*prior_dict['prior_params'][2:]))
-            
+            transforms[param] = likelihood_utils.LogOddsTransform(
+                *prior_dict['prior_params'][2:])            
         else:
             raise ValueError(f"{prior_dict['prior_type']=} not understood")
         
@@ -63,22 +63,46 @@ def get_prior(params_dict):
         
     prior_combined = likelihood_utils.MultipleIndependent(prior)
         
-    return prior_combined, param_names, bounds
+    return prior_combined, param_names, transforms
 
-def real2norm(params):
+def main(odir, config, specdir, data_file, seed, n_samples, n_chains,
+         coadd_equiv_crosses=True):
+    '''
+    Run mcmc script.
 
-    return params * jnp.asarray([1e3, 1e2, 1e1, 1e2, 1e4])
-
-def norm2real(params):
-
-    return params / jnp.asarray([1e3, 1e2, 1e1, 1e2, 1e4])
-
-def main(odir, config, specdir, data_file, seed, n_samples, n_chains):
-
+    Parameters
+    ----------
+    odir : str
+        Path to output directory.
+    config : dict
+        Dictionary with "data", "fixed_params" and "params" keys.
+    specdir : str
+        Path to data directory containing power spectrum files.
+    data_file : str
+        path to .npy file containting observed spectra.
+    seed : int
+        Global seed from which all RNGs are seeded.    
+    n_samples : int
+        Number of mcmc samples per chain.
+    n_chains : int
+        Number of mcmc chains.
+    coadd_equiv_crosses : bool, optional
+        If set, assume we have used the mean of e.g. comp1 x comp2 and comp2 x comp1 spectra.
+    '''
+    
     data_dict, fixed_params_dict, params_dict = script_utils.parse_config(config)
-    prior_combined, param_names, bounds = get_prior(params_dict)
 
-    cmb_simulator = sim_utils.CMBSimulator(specdir, data_dict, fixed_params_dict)
+    print(f'{data_dict=}')
+    print(f'{fixed_params_dict=}')
+    print(f'{params_dict=}')
+    params_dict.pop('amp_beta_dust')
+    params_dict.pop('gamma_beta_dust')    
+
+    print(params_dict)
+    prior_combined, param_names, transforms = get_prior(params_dict)
+
+    cmb_simulator = sim_utils.CMBSimulator(specdir, data_dict, fixed_params_dict,
+                                           coadd_equiv_crosses=coadd_equiv_crosses)
     
     # Get prior mean.
     mean = prior_combined.get_mean()
@@ -94,90 +118,174 @@ def main(odir, config, specdir, data_file, seed, n_samples, n_chains):
     for param_name, pd in params_dict.items():
         true_params[param_name] = pd['true_value']    
 
+    print(f'{true_params=}')
+        
     signal_spectra = cmb_simulator.get_signal_spectra(
         true_params['r_tensor'], true_params['A_lens'], true_params['A_d_BB'],
         true_params['alpha_d_BB'], true_params['beta_dust'])
-
     noise_spectra = cmb_simulator.get_noise_spectra()
+    
+    if coadd_equiv_crosses:    
+        coadd_mat = likelihood_utils.get_coadd_transform_matrix(
+            cmb_simulator.sels_to_coadd, sim_utils.get_ntri(cmb_simulator.nsplit, cmb_simulator.nfreq))
+    else:
+        coadd_mat = None
+
     cov = likelihood_utils.get_cov(
         np.asarray(signal_spectra), noise_spectra, cmb_simulator.bins, cmb_simulator.lmin,
-        cmb_simulator.lmax, cmb_simulator.nsplit, cmb_simulator.nfreq)
+        cmb_simulator.lmax, cmb_simulator.nsplit, cmb_simulator.nfreq, coadd_matrix=coadd_mat)
     
     # Invert matrix
     icov = jnp.asarray(mat_utils.matpow(np.asarray(cov), -1))
-
-
-
-
     
-    # Init sampler
-    key = jax.random.key(seed)
-
     tri_indices = sim_utils.get_tri_indices(cmb_simulator.nsplit, cmb_simulator.nfreq)
+    if coadd_equiv_crosses:
+        data = data.reshape(coadd_mat.shape[0], -1)
+    else:
+        data = data.reshape(tri_indices.shape[0], -1)
 
-    data = data.reshape(tri_indices.shape[0], -1)
+    def _logprob(params):
+        '''
+        Evaluate the posterior for a given set of parameters.
 
-    def logdens(params):
+        Parameters
+        ----------
+        params : dict
+            Dictionary with parameter value for each parameter.
 
-        params = norm2real(params)
-        model = cmb_simulator.get_signal_spectra(*params)
+        Returns
+        -------
+        logprob : float
+            Posterior probability for input parameters.
+        '''
+        
+        model = cmb_simulator.get_signal_spectra(
+            params['r_tensor'], params['A_lens'], params['A_d_BB'],
+            params['alpha_d_BB'], params['beta_dust'], A_s_BB=params.get('A_s_BB'),
+            alpha_s_BB=params.get('alpha_s_BB'), beta_sync=params.get('beta_sync'),
+            rho_ds=params.get('rho_ds'))
+        
         loglike = likelihood_utils.loglike(
-            model, data, icov, tri_indices)
+            model, data, icov, tri_indices, coadd_matrix=coadd_mat)
+
+        ordered_params = jnp.array([params[k] for k in param_names])
+        logprior = prior_combined.log_prob(ordered_params)
         
-        logprior = prior_combined.log_prob(params)
+        return loglike + logprior
 
-        return -(loglike + logprior)
+    def logprob_transformed(params):
+        '''
+
+        '''
         
-    class BSampler():
+        # Loop over parameters, transform each of them and compute log oab jacobian for each.
+        params = {k: transforms[k].inv_func(v) for k, v in params.items()}
 
-        def __init__(self, d):
+        clipped_abs_jac = lambda transform, y : jnp.clip(
+            transform.abs_jac(y), jnp.finfo(y.dtype).smallest_normal)
+        
+        log_abs_jac = {k: clipped_abs_jac(transforms[k], v) for k, v in params.items()}
+        
+        sum_log_abs_jac = jax.tree.reduce(
+            lambda acc, x: acc + jnp.sum(x), log_abs_jac, initializer=0.0)
+        
+        logprob = _logprob(params)
+        
+        return logprob 
 
-            self.d = d
-            self.grad_nlogp = jax.jit(jax.value_and_grad(logdens))
+    def get_prior_draw_transformed(rng_key):
+        '''
+        Returns
+        -------
+        draw : dict
+            Parameter draw for each parameter
+        '''
+        
+        draw = prior_combined.sample(rng_key)
 
-        def transform(self, x):
-            return x
+        return {k: transforms[k].func(v) for k, v in zip(param_names, draw)}
 
-        def prior_draw(self, key):
+    num_steps = 32
+    num_chains = 1
 
-            return real2norm(prior_combined.sample(key))
+    # Init sampler
+    rng_key = jax.random.key(seed)
+    rng_key, init_key = jax.random.split(rng_key)
 
-    target = BSampler(mean.size)
+    initial_position = get_prior_draw_transformed(init_key)
+    print(f'{initial_position=}')    
+    print('start warmup')
+    print(logprob_transformed(initial_position))
+    print(jax.grad(logprob_transformed)(initial_position))
 
-    positive_indices = jnp.asarray([0])
+    warmup = blackjax.window_adaptation(
+        blackjax.hmc, logprob_transformed, is_mass_matrix_diagonal=True,
+        num_integration_steps=num_steps,
+        initial_step_size=1e-5, target_acceptance_rate=0.8)
     
-    boundary = Boundary(
-        target.d, where_positive=positive_indices)
+    rng_key, warmup_key, sample_key = jax.random.split(rng_key, 3)
+    (state, parameters), _ = warmup.run(warmup_key, initial_position, num_steps=512)
 
-    sampler = Sampler(target, varEwanted=5e-3, boundary=boundary, diagonal_preconditioning=True,
-                     frac_tune1=0.4, frac_tune2=0.1, frac_tune3=0.1)
+    print(state)
+    print(parameters)
+        
+    hmc = blackjax.hmc(logprob_transformed, **parameters)
+    hmc_kernel = jax.jit(hmc.step)
 
-    print(logdens(mean))
-    print(logdens(mean + 100))    
-    
-    print('before sampler')
-    
-    samples = sampler.sample(n_samples, num_chains=n_chains)
+    def inference_loop(rng_key, kernel, initial_state, num_samples):
+        @jax.jit
+        def one_step(state, rng_key):
+            state, _ = kernel(rng_key, state)
+            return state, state
 
-    print('after sampler')
-    
-    samples = samples.reshape(n_samples * n_chains, -1)
-    print(samples)
-    mean = jnp.mean(samples, axis=0)
-    print(mean)
-    print(jnp.std(samples, axis=0))
+        keys = jax.random.split(rng_key, num_samples)
+        _, states = jax.lax.scan(one_step, initial_state, keys)
 
-    fig, axs = plt.subplots(nrows=5, dpi=300, constrained_layout=True, sharex=True, figsize=(4, 8))
-    for idx in range(5):
-        axs[idx].plot(samples[::100,idx] - mean[idx], label=param_names[idx])
-        axs[idx].legend()
-    fig.savefig(opj(odir, 'samples'))
-    plt.close(fig)
+        return states
 
-    samples = norm2real(samples)
-    
-    np.save(opj(odir, 'samples_mcmc.npy'), np.asarray(samples))
-    
+    rng_key, sample_key = jax.random.split(rng_key)
+    states = inference_loop(sample_key, hmc_kernel, state, n_samples)
+
+    mcmc_samples = states.position
+
+    def apply_per_param_transform(mcmc_samples, transforms):
+        return {k: transforms[k].inv_func(v) for k, v in mcmc_samples.items()}
+
+    transform_fn = lambda position: apply_per_param_transform(position, transforms)
+    transformed = jax.vmap(transform_fn)(mcmc_samples)
+
+    print('alpha_d_BB')
+    print(transformed['alpha_d_BB'])
+    print(jnp.mean(transformed['alpha_d_BB']))
+    print(jnp.std(transformed['alpha_d_BB']))
+
+    print('r_tensor')
+    print(transformed['r_tensor'])
+    print(jnp.mean(transformed['r_tensor']))
+    print(jnp.std(transformed['r_tensor']))
+
+    print('A_lens')
+    print(transformed['A_lens'])
+    print(jnp.mean(transformed['A_lens']))
+    print(jnp.std(transformed['A_lens']))
+
+    print('A_d_BB')
+    print(transformed['A_d_BB'])
+    print(jnp.mean(transformed['A_d_BB']))
+    print(jnp.std(transformed['A_d_BB']))
+
+    print('beta_dust')
+    print(transformed['beta_dust'])
+    print(jnp.mean(transformed['beta_dust']))
+    print(jnp.std(transformed['beta_dust']))
+
+    # Save samples in numpy array similar to run_sbi_basic output.
+    samples = np.zeros((n_samples, len(param_names)))
+    for pidx, pname in enumerate(param_names):
+        samples[:,pidx] = transformed[pname]
+                       
+    np.save(opj(odir, 'samples.npy'), samples)
+        
 if __name__ == '__main__':
 
     parser = argparse.ArgumentParser()
@@ -189,6 +297,8 @@ if __name__ == '__main__':
                         help="Random seed for the sampler.")
     parser.add_argument('--n_samples', type=int, default=10000, help="samples per chain.")
     parser.add_argument('--n_chains', type=int, default=1, help="number of independent chains.")
+    parser.add_argument('--no-coadd-equiv-crosses', action='store_true',
+                        help='Do not coadd comp1 x comp2 and comp2 x comp1 cross spectra in data vector')
 
     args = parser.parse_args()
 
@@ -196,4 +306,5 @@ if __name__ == '__main__':
     with open(args.config, 'r') as yfile:
         config = yaml.safe_load(yfile)
 
-    main(args.odir, config, args.specdir, args.data, args.seed, args.n_samples, args.n_chains)
+    main(args.odir, config, args.specdir, args.data, args.seed, args.n_samples, args.n_chains,
+         coadd_equiv_crosses=not args.no_coadd_equiv_crosses)

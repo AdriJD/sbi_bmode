@@ -70,7 +70,7 @@ run35e	like run35 but cmb + dust + dbeta
 run35f	like run35 but cmb + dust + dbeta + deproj dust
 
 run36	like run35 but with test set, Alens=0.4 and higher lmax (config14)
-run36b	like 36 but after changing how deprection of dust and dbeta map is handled
+run36b	like 36 but after changing how deprojection of dust and dbeta map is handled
 run36c	like 36b but 3x the sims
 run37	like run36 but 2x the sims
 
@@ -140,3 +140,6 @@ run51_optuna : optuna for run51
 run52_optuna : optuna for run52
 run52_optuna_b : optuna for run52, but only targetting r and Alens
 run53_optuna : optuna for run53
+
+mcmc41	     : likelihood for run41
+checkcov41   : cov check for run41
