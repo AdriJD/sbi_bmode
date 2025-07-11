@@ -153,6 +153,12 @@ class CMBSimulator():
         else:
             self.sels_to_coadd = get_coadd_sels(self.nsplit, self.nfreq)
             self.size_data = len(self.sels_to_coadd) * (self.bins.size - 1)
+
+        # This is redundant in the case where we're not using pyilc, but
+        # in the case we are using pyilc, these are useful to create multi-freq
+        # test sets.
+        self.sels_to_coadd_mf = get_coadd_sels(self.nsplit, self.nfreq)
+        self.size_data_mf = len(self.sels_to_coadd_mf) * (self.bins.size - 1)
             
         self.sensitivity_mode = data_dict['sensitivity_mode']
         self.lknee_mode = data_dict['lknee_mode']
@@ -377,7 +383,8 @@ class CMBSimulator():
     def draw_data(self, r_tensor, A_lens, A_d_BB, alpha_d_BB, beta_dust,
                   seed, amp_beta_dust=None, gamma_beta_dust=None, A_s_BB=None,
                   alpha_s_BB=None, beta_sync=None,
-                  amp_beta_sync=None, gamma_beta_sync=None, rho_ds=None):
+                  amp_beta_sync=None, gamma_beta_sync=None, rho_ds=None,
+                  also_return_mf_data=False):
         '''
         Draw data realization.
 
@@ -411,11 +418,15 @@ class CMBSimulator():
             Tilt of synchrotron beta power spectrum.
         rho_ds : float, optional
             Correlation coefficient between dust and synchroton amplitudes.
+        also_return_mf_data : bool, optional
+            If set, additionally return the multi-frequency data vector.
 
         Returns
         -------
         data : (ndata) array
             Data realization.
+        data_mf : (ndata_mf) array, optional
+            Multi-frequency data, only if `also_return_mf_data` is True.
         '''
 
         if seed == -1:
@@ -432,6 +443,9 @@ class CMBSimulator():
             gamma_beta_sync=gamma_beta_sync, rho_ds=rho_ds,
             signal_filter=self.highpass_filter)
 
+        # We always compute this even though not always needed, but cheap enough.
+        spectra_mf = estimate_spectra(omap, self.minfo, self.ainfo)
+        
         if self.pyilcdir:
             # build NILC B-mode maps.
             B_maps = np.zeros((self.nsplit, self.nfreq, self.minfo.npix))
@@ -455,22 +469,30 @@ class CMBSimulator():
                 freq_pivot_sync=self.freq_pivot_sync, output_dir=self.odir, remove_files=True,
                 debug=False)
 
-            spectra = estimate_spectra_nilc(nilc_maps, self.minfo, self.ainfo)
-
-        else:
-            spectra = estimate_spectra(omap, self.minfo, self.ainfo)
+            spectra_nilc = estimate_spectra_nilc(nilc_maps, self.minfo, self.ainfo)
 
         if self.coadd_equiv_crosses:
-            # coadd spectra
-            ncomps = self.nfreq if self.pyilcdir is None else self.ncomp
-            spectra = coadd(spectra, self.sels_to_coadd)
+            spectra_mf = coadd(spectra_mf, self.sels_to_coadd_mf)
+            if self.pyilcdir: 
+                spectra_nilc = coadd(spectra_nilc, self.sels_to_coadd)
 
-        data = get_final_data_vector(spectra, self.bins, self.lmin, self.lmax)
+        data_mf = get_final_data_vector(spectra_mf, self.bins, self.lmin, self.lmax)
+        if pyilcdir:
+            data_nilc = get_final_data_vector(spectra_nilc, self.bins, self.lmin, self.lmax)            
 
         if self.norm_params:
-            data = self.get_norm_data(data)
+            data_mf = self.get_norm_data(data_mf)
+            if pyilcdir:
+                data_nilc = self.get_norm_data(data_nilc)
 
-        return data
+        if pyilcdir:
+            out = data_nilc
+        else:
+            out = data_mf
+        if also_return_mf_data:
+            out = (out, data_mf)
+                
+        return out
 
     def get_norm_data(self, data):
         '''

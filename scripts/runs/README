@@ -100,6 +100,7 @@ run50   extra sims for run49
 run51	extra sims for run45
 run52	NILC run for config18
 run53	NILC run for config19
+run54	very short NILC run for config 18 to create NILC + MF test set
 
 mcmc33  
 
