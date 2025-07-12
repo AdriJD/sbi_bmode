@@ -1,5 +1,6 @@
 import jax
 import jax.numpy as jnp
+from jax.scipy.special import logit, expit
 import numpy as np
 from scipy.stats import binned_statistic
 

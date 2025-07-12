@@ -209,10 +209,40 @@ def get_ell_shape(lmax, alpha, ell_pivot=80):
 
     out = jnp.zeros((lmax + 1))
     ells = jnp.arange(2, lmax + 1)
-    dells = ells * (ells + 1) / 2 / np.pi
-
+    dells = ells * (ells + 1) / 2 / jnp.pi
+    
     out = out.at[2:].set((ells / ell_pivot) ** (alpha) / dells)
+    
+    return out
 
+# I needed to use this function because just using jnp.sqrt(get_ell_shape)
+# would cause nan in the computation of the gradient. Not sure what's going
+# on, probably something similar to this:
+# https://docs.jax.dev/en/latest/faq.html#gradients-contain-nan-where-using-where
+def get_sqrt_ell_shape(lmax, alpha, ell_pivot=80):
+    '''
+    Get the square root of the ell-dependent part of the template.
+
+    Parameters
+    ----------
+    lmax : int
+        Maximum multipole.
+    alpha : float
+        Power law index.
+    ell_pivot : int, optional
+        Pivot multipole.
+
+    Returns
+    -------
+    out : (nell) array
+        Power law.
+    '''
+
+    out = jnp.zeros((lmax + 1))
+    ells = jnp.arange(2, lmax + 1)
+    dells = ells * (ells + 1) / 2 / jnp.pi
+    out = out.at[2:].set(jnp.sqrt((ells / ell_pivot) ** (alpha) / dells))
+    
     return out
 
 def bin_spectrum(spec, ells, bins, lmin, lmax, use_jax=False):
@@ -420,9 +450,10 @@ def get_dust_sync_cross_spectra(rho_ds, amp_dust, alpha_dust, amp_sync, alpha_sy
 
     out = jnp.zeros((nfreq, nfreq, lmax+1))
     out = out.at[:].set(
-        rho_ds * jnp.sqrt(amp_dust * amp_sync * get_ell_shape(lmax, alpha_dust) \
-                          * get_ell_shape(lmax, alpha_sync))[jnp.newaxis,jnp.newaxis,:])
-
+        rho_ds * jnp.sqrt(amp_dust * amp_sync) * get_sqrt_ell_shape(lmax, alpha_dust) \
+                          * get_sqrt_ell_shape(lmax, alpha_sync)[jnp.newaxis,jnp.newaxis,:])
+    
+    
     get_sed1 = lambda freq: get_sed_dust(freq, beta_dust, temp, freq_pivot_dust)
     get_sed2 = lambda freq: get_sed_sync(freq, beta_sync, freq_pivot_sync)
 

@@ -5,7 +5,6 @@ import argparse
 
 import jax
 import jax.numpy as jnp
-from jax.scipy.special import logit, expit
 import blackjax
 import matplotlib.pyplot as plt
 import numpy as np
@@ -65,6 +64,7 @@ def get_prior(params_dict):
         
     return prior_combined, param_names, transforms
 
+# ADD option for multiple data files, and optionally, true parameters of same size. DO MPI over those.
 def main(odir, config, specdir, data_file, seed, n_samples, n_chains,
          coadd_equiv_crosses=True):
     '''
@@ -97,6 +97,8 @@ def main(odir, config, specdir, data_file, seed, n_samples, n_chains,
     print(f'{params_dict=}')
     params_dict.pop('amp_beta_dust')
     params_dict.pop('gamma_beta_dust')    
+    params_dict.pop('amp_beta_sync')
+    params_dict.pop('gamma_beta_sync')    
 
     print(params_dict)
     prior_combined, param_names, transforms = get_prior(params_dict)
@@ -158,7 +160,7 @@ def main(odir, config, specdir, data_file, seed, n_samples, n_chains,
         logprob : float
             Posterior probability for input parameters.
         '''
-        
+
         model = cmb_simulator.get_signal_spectra(
             params['r_tensor'], params['A_lens'], params['A_d_BB'],
             params['alpha_d_BB'], params['beta_dust'], A_s_BB=params.get('A_s_BB'),
@@ -215,9 +217,9 @@ def main(odir, config, specdir, data_file, seed, n_samples, n_chains,
     initial_position = get_prior_draw_transformed(init_key)
     print(f'{initial_position=}')    
     print('start warmup')
-    print(logprob_transformed(initial_position))
-    print(jax.grad(logprob_transformed)(initial_position))
-
+    print(f'{logprob_transformed(initial_position)=}')
+    print(f'{jax.grad(logprob_transformed)(initial_position)=}')
+    
     warmup = blackjax.window_adaptation(
         blackjax.hmc, logprob_transformed, is_mass_matrix_diagonal=True,
         num_integration_steps=num_steps,
@@ -226,8 +228,8 @@ def main(odir, config, specdir, data_file, seed, n_samples, n_chains,
     rng_key, warmup_key, sample_key = jax.random.split(rng_key, 3)
     (state, parameters), _ = warmup.run(warmup_key, initial_position, num_steps=512)
 
-    print(state)
-    print(parameters)
+    print(f'{state=}')
+    print(f'{parameters=}')
         
     hmc = blackjax.hmc(logprob_transformed, **parameters)
     hmc_kernel = jax.jit(hmc.step)
@@ -253,31 +255,6 @@ def main(odir, config, specdir, data_file, seed, n_samples, n_chains,
 
     transform_fn = lambda position: apply_per_param_transform(position, transforms)
     transformed = jax.vmap(transform_fn)(mcmc_samples)
-
-    print('alpha_d_BB')
-    print(transformed['alpha_d_BB'])
-    print(jnp.mean(transformed['alpha_d_BB']))
-    print(jnp.std(transformed['alpha_d_BB']))
-
-    print('r_tensor')
-    print(transformed['r_tensor'])
-    print(jnp.mean(transformed['r_tensor']))
-    print(jnp.std(transformed['r_tensor']))
-
-    print('A_lens')
-    print(transformed['A_lens'])
-    print(jnp.mean(transformed['A_lens']))
-    print(jnp.std(transformed['A_lens']))
-
-    print('A_d_BB')
-    print(transformed['A_d_BB'])
-    print(jnp.mean(transformed['A_d_BB']))
-    print(jnp.std(transformed['A_d_BB']))
-
-    print('beta_dust')
-    print(transformed['beta_dust'])
-    print(jnp.mean(transformed['beta_dust']))
-    print(jnp.std(transformed['beta_dust']))
 
     # Save samples in numpy array similar to run_sbi_basic output.
     samples = np.zeros((n_samples, len(param_names)))

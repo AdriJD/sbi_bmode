@@ -477,15 +477,15 @@ class CMBSimulator():
                 spectra_nilc = coadd(spectra_nilc, self.sels_to_coadd)
 
         data_mf = get_final_data_vector(spectra_mf, self.bins, self.lmin, self.lmax)
-        if pyilcdir:
+        if self.pyilcdir:
             data_nilc = get_final_data_vector(spectra_nilc, self.bins, self.lmin, self.lmax)            
 
         if self.norm_params:
             data_mf = self.get_norm_data(data_mf)
-            if pyilcdir:
+            if self.pyilcdir:
                 data_nilc = self.get_norm_data(data_nilc)
 
-        if pyilcdir:
+        if self.pyilcdir:
             out = data_nilc
         else:
             out = data_mf

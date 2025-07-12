@@ -143,7 +143,7 @@ def simulate_for_sbi_mpi(simulator, proposal, param_names, num_sims, ndata, seed
         sims_full = torch.as_tensor(sims_full.reshape(num_sims, ndata).astype(np.float32))
         if also_return_mf_data:
             sims_full_mf = torch.as_tensor(
-                sims_full_mf.reshape(num_sims, simulator.data_size_mf).astype(np.float32))
+                sims_full_mf.reshape(num_sims, simulator.size_data_mf).astype(np.float32))
 
     if also_return_mf_data:
         out = (thetas_full, sims_full, sims_full_mf)
