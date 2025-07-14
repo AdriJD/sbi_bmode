@@ -95,10 +95,10 @@ def main(odir, config, specdir, data_file, seed, n_samples, n_chains,
     print(f'{data_dict=}')
     print(f'{fixed_params_dict=}')
     print(f'{params_dict=}')
-    params_dict.pop('amp_beta_dust')
-    params_dict.pop('gamma_beta_dust')    
-    params_dict.pop('amp_beta_sync')
-    params_dict.pop('gamma_beta_sync')    
+    params_dict.pop('amp_beta_dust', None)
+    params_dict.pop('gamma_beta_dust', None)  
+    params_dict.pop('amp_beta_sync', None)
+    params_dict.pop('gamma_beta_sync', None)
 
     print(params_dict)
     prior_combined, param_names, transforms = get_prior(params_dict)
@@ -124,7 +124,9 @@ def main(odir, config, specdir, data_file, seed, n_samples, n_chains,
         
     signal_spectra = cmb_simulator.get_signal_spectra(
         true_params['r_tensor'], true_params['A_lens'], true_params['A_d_BB'],
-        true_params['alpha_d_BB'], true_params['beta_dust'])
+        true_params['alpha_d_BB'], true_params['beta_dust'],
+        A_s_BB=true_params.get('A_s_BB'), alpha_s_BB=true_params.get('alpha_s_BB'),
+        beta_sync=true_params.get('beta_sync'), rho_ds=true_params.get('rho_ds'))
     noise_spectra = cmb_simulator.get_noise_spectra()
     
     if coadd_equiv_crosses:    
@@ -208,30 +210,42 @@ def main(odir, config, specdir, data_file, seed, n_samples, n_chains,
         return {k: transforms[k].func(v) for k, v in zip(param_names, draw)}
 
     num_steps = 32
-    num_chains = 1
 
     # Init sampler
     rng_key = jax.random.key(seed)
-    rng_key, init_key = jax.random.split(rng_key)
+    rng_key, *init_keys = jax.random.split(rng_key, n_chains + 1)
+    init_keys = jnp.stack(init_keys)
+    
+    @jax.vmap
+    def initialize_chain(rng_key):
+        return get_prior_draw_transformed(rng_key)
 
-    initial_position = get_prior_draw_transformed(init_key)
-    print(f'{initial_position=}')    
+    initial_positions = initialize_chain(init_keys)
+
+    print(f'{initial_positions=}')    
+    
     print('start warmup')
-    print(f'{logprob_transformed(initial_position)=}')
-    print(f'{jax.grad(logprob_transformed)(initial_position)=}')
     
-    warmup = blackjax.window_adaptation(
-        blackjax.hmc, logprob_transformed, is_mass_matrix_diagonal=True,
-        num_integration_steps=num_steps,
-        initial_step_size=1e-5, target_acceptance_rate=0.8)
-    
-    rng_key, warmup_key, sample_key = jax.random.split(rng_key, 3)
-    (state, parameters), _ = warmup.run(warmup_key, initial_position, num_steps=512)
-
-    print(f'{state=}')
-    print(f'{parameters=}')
+    def run_warmup(rng_key, initial_position):
+        warmup = blackjax.window_adaptation(
+            blackjax.hmc, logprob_transformed, is_mass_matrix_diagonal=True,
+            num_integration_steps=num_steps,
+            initial_step_size=1e-5, target_acceptance_rate=0.8)
         
-    hmc = blackjax.hmc(logprob_transformed, **parameters)
+        (state, parameters), _ = warmup.run(rng_key, initial_position, num_steps=512)
+        return state, parameters
+
+    rng_key, *warmup_keys = jax.random.split(rng_key, n_chains + 1)
+    warmup_keys = jnp.stack(warmup_keys)
+    states, parameters = jax.vmap(run_warmup)(warmup_keys, initial_positions)
+        
+    print(f'{states=}')
+    print(f'{parameters=}')
+    
+    params_0 = jax.tree.map(lambda x: x[0], parameters)
+    print(f'{params_0=}')
+    hmc = blackjax.hmc(logprob_transformed, **params_0)
+    
     hmc_kernel = jax.jit(hmc.step)
 
     def inference_loop(rng_key, kernel, initial_state, num_samples):
@@ -245,22 +259,29 @@ def main(odir, config, specdir, data_file, seed, n_samples, n_chains,
 
         return states
 
-    rng_key, sample_key = jax.random.split(rng_key)
-    states = inference_loop(sample_key, hmc_kernel, state, n_samples)
+    rng_key, *sample_keys = jax.random.split(rng_key, n_chains + 1)
+    sample_keys = jnp.stack(sample_keys)
 
+    batched_inference_loop = jax.vmap(
+        lambda rng, state: inference_loop(rng, hmc_kernel, state, n_samples),
+        in_axes=(0, 0))
+    states = batched_inference_loop(sample_keys, states)
+
+    print(f'{states=}')
+    
     mcmc_samples = states.position
 
     def apply_per_param_transform(mcmc_samples, transforms):
         return {k: transforms[k].inv_func(v) for k, v in mcmc_samples.items()}
 
     transform_fn = lambda position: apply_per_param_transform(position, transforms)
-    transformed = jax.vmap(transform_fn)(mcmc_samples)
+    transformed = jax.vmap(jax.vmap(transform_fn))(mcmc_samples)
 
     # Save samples in numpy array similar to run_sbi_basic output.
-    samples = np.zeros((n_samples, len(param_names)))
+    samples = np.zeros((n_chains, n_samples, len(param_names)))        
     for pidx, pname in enumerate(param_names):
-        samples[:,pidx] = transformed[pname]
-                       
+        samples[:,:,pidx] = transformed[pname]
+        
     np.save(opj(odir, 'samples.npy'), samples)
         
 if __name__ == '__main__':
