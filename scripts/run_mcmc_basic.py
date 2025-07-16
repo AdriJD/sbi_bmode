@@ -10,9 +10,12 @@ import matplotlib.pyplot as plt
 import numpy as np
 from pixell import curvedsky
 from optweight import mat_utils
+from mpi4py import MPI
 
 from sbi_bmode import (spectra_utils, sim_utils, so_utils, likelihood_utils,
                        script_utils)
+
+comm = MPI.COMM_WORLD
 
 opj = os.path.join
 

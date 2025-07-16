@@ -103,6 +103,16 @@ run53	NILC run for config19
 run54	very short NILC run for config 18 to create NILC + MF test set
 run55	NLIC run for config20 (so no gamma's) same as 52 otherwise.
 
+run52b	8640 extra sims for run52
+run55b	8640 extra sims for run55
+
+run56	config18 but with just NILC
+run57	config18 no dbd or dbs maps or deprojection
+run58	config18 with NILC + d + s deproj but no maps
+run59	config18 with NILC + d + s + dbd + dbs deproj but no maps
+
+
+
 mcmc33  
 
 checkcov00    check analytic cov with Monte-Carlo
@@ -142,7 +152,14 @@ run51_optuna : optuna for run51
 run52_optuna : optuna for run52
 run52_optuna_b : optuna for run52, but only targetting r and Alens
 run53_optuna : optuna for run53
-run55_optuna : optuna for tun55
+run55_optuna : optuna for run55
+
+run52b_optuna : optuna for run52b
+run55b_optuna :	optuna for run55b
+run56_optuna  : optuna for run56
+run57_optuna  : optuna for run57
+run58_optuna  : optuna for run58
+run59_optuna  : optuna for run59
 
 mcmc41	     : mcmc for run41
 checkcov41   : cov check for run41
