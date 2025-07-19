@@ -101,7 +101,7 @@ run51	extra sims for run45
 run52	NILC run for config18
 run53	NILC run for config19
 run54	very short NILC run for config 18 to create NILC + MF test set
-run55	NLIC run for config20 (so no gamma's) same as 52 otherwise.
+run55	NILC run for config20 (so no gamma's) same as 52 otherwise.
 
 run52b	8640 extra sims for run52
 run55b	8640 extra sims for run55
@@ -111,6 +111,17 @@ run57	config18 no dbd or dbs maps or deprojection
 run58	config18 with NILC + d + s deproj but no maps
 run59	config18 with NILC + d + s + dbd + dbs deproj but no maps
 
+run60	SNPE 1000 x 30, config18, like run52
+run61	HILC like run52
+run62	SNPE 5000 * 6, config18, like run52, different network compared to run60
+run63	TSNPE 1000 * 10, config18
+
+run52bt	test set with config20 otherwise same as 52b
+run56t 	test set with config20 otherwise same as 56
+run57t	test set with config20 otherwise same as 57
+run58t	test set with config20 otherwise same as 58
+run59t	test set with config20 otherwise same as 59
+run61t	test set with config20 otherwise same as 61
 
 
 mcmc33  
@@ -160,6 +171,14 @@ run56_optuna  : optuna for run56
 run57_optuna  : optuna for run57
 run58_optuna  : optuna for run58
 run59_optuna  : optuna for run59
+run61_optuna  :	optuna for run61
+
+run52bt_optuna : optuna for run52bt
+run56t_optuna :  optuna for run56t
+run57t_optuna :  optuna for run57t
+run58t_optuna : optuna for run58t
+run59t_optuna : optuna for run59t
+run61t_optuna : optuna for run61t
 
 mcmc41	     : mcmc for run41
 checkcov41   : cov check for run41

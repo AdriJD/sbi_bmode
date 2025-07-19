@@ -323,7 +323,7 @@ def main(path_params, path_data, path_data_obs, odir, imgdir, config, n_samples,
                                     hidden_features=hidden_features,
                                     num_transforms=num_transforms,
                                     num_block=num_blocks, dropout_probability=dropout_probability,
-                                    use_batch_num=use_batch_norm,
+                                    use_batch_norm=use_batch_norm,
                                     embedding_net=embedding_net)
     inference = SNPE(prior, density_estimator=neural_posterior)
 
@@ -414,7 +414,7 @@ def run_optuna(trial, path_params, path_data, path_data_obs, odir_base, config, 
     
     #use_batch_norm = trial.suggest_categorical(
     #    "use_batch_norm", [False, True])
-    use_batch_norm = True
+    use_batch_norm = False
 
     embed = False
     #embed_num_layers = trial.suggest_int("embed_num_layers", 1, 5)

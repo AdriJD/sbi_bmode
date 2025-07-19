@@ -8,6 +8,7 @@ from mpi4py import MPI
 import torch
 from sbi.inference import SNPE, simulate_for_sbi, FMPE
 from sbi.utils.sbiutils import seed_all_backends
+from sbi.utils import RestrictedPrior, get_density_thresholder
 from sbi.utils.user_input_checks import (
     check_sbi_inputs,
     process_prior,
@@ -206,7 +207,9 @@ def main(odir, config, specdir, seed, n_train, n_samples, n_rounds, pyilcdir, us
          e_moped=False, n_moped=None, density_estimator_type='maf', coadd_equiv_crosses=True,
          apply_highpass_filter=True, n_test=None, previous_seed_file=None, data_mean_file=None,
          data_std_file=None, previous_data_obs_file=None, previous_data_file=None,
-         previous_params_file=None):
+         previous_params_file=None, num_hidden_features=50, num_transforms=5,
+         num_blocks=2, clip_max_norm=5.0, training_batch_size=200, learning_rate=5e-4,
+         max_num_epochs=1000, stop_after_epochs=20, tsnpe=False):
     '''
     Run SBI.
 
@@ -306,6 +309,25 @@ def main(odir, config, specdir, seed, n_train, n_samples, n_rounds, pyilcdir, us
         Path to .npy file containing previous (normalized) data vectors.
     previous_params_file : str, optional
         Path to .npy file containing previous parameter vectors.
+
+    num_hidden_features : int, optional
+        Number of elements per layer of the density estimator network.
+    num_transforms : int, optional
+        Number of transforms when a flow is used.
+    num_blocks : int, optional
+        number of blocks used for residual net for context embedding.
+    clip_max_norm : float, optional
+        Value at which to clip the total gradient norm.
+    training_batch_size : int, optional
+        Training batch size.
+    learning_rate : float, optional
+        Constant learning rate for Adam optimizer.
+    max_num_epochs : int, optional
+        Max number of epochs.
+    stop_after_epochs : int, optional
+        Stop after validation loss has not improved after this many epochs.
+    tsnpe : bool, optional
+        If set, use truncated proposals for SNPE (TSNPE) method.
     '''
 
     if previous_seed_file:
@@ -475,7 +497,10 @@ def main(odir, config, specdir, seed, n_train, n_samples, n_rounds, pyilcdir, us
            num_layers=embed_num_layers,
            num_hiddens=embed_num_hiddens)
         neural_posterior = posterior_nn(model=density_estimator_type,
-                                        embedding_net=embedding_net)
+                                        embedding_net=embedding_net,
+                                        hidden_features=num_hidden_features,
+                                        num_transforms=num_transforms,
+                                        num_blocks=num_blocks)
         inference = SNPE(prior=prior, density_estimator=neural_posterior)
     elif fmpe:
         net_builder = flowmatching_nn(
@@ -517,13 +542,32 @@ def main(odir, config, specdir, seed, n_train, n_samples, n_rounds, pyilcdir, us
             else:
                 density_estimator = inference.append_simulations(
                     theta, x, proposal=proposal,
-                ).train(show_train_summary=True, use_combined_loss=True)
+                ).train(training_batch_size=training_batch_size,
+                        learning_rate=learning_rate,
+                        clip_max_norm=clip_max_norm,
+                        stop_after_epochs=stop_after_epochs,
+                        max_num_epochs=max_num_epochs,
+                        show_train_summary=True, use_combined_loss=True,
+                        force_first_round_loss=True if tsnpe else False)
 
-            posterior = inference.build_posterior(density_estimator)
-            #proposal = posterior.set_default_x(x_obs) # Not needed I think.
+            posterior = inference.build_posterior(density_estimator)            
+            
+            with open(opj(odir, f'posterior_round_{ridx:03d}.pkl'), "wb") as handle:
+                pickle.dump(posterior, handle)
+            
             samples = posterior.sample((n_samples,), x=x_obs)
             np.save(opj(odir, f'samples_round_{ridx:03d}.npy'), samples)
 
+            # For SNPE.
+            posterior = posterior.set_default_x(x_obs)
+
+            if tsnpe:
+                accept_reject_fn = get_density_thresholder(posterior, quantile=1e-4)
+                proposal = RestrictedPrior(prior, accept_reject_fn, sample_with="rejection")
+            else:
+                # SNPE-C.
+                proposal = posterior
+            
         proposal = comm.bcast(proposal, root=0)
 
     if n_test is not None:
@@ -611,15 +655,6 @@ if __name__ == '__main__':
     parser.add_argument('--score-compress', action='store_true',
                         help="Compress data vector with score compression")
     parser.add_argument('--no-norm', action='store_true', help="Do not normalize the data vector")
-    parser.add_argument('--embed', action='store_true',
-                        help="Estimate and apply embedding (compression) network")
-    parser.add_argument('--embed-num-layers', type=int, default=2,
-                        help="Number of layers in embedding nework")
-    parser.add_argument('--embed-num-hiddens', type=int, default=25,
-                        help="Number of hidden units in each layer of the embedding network")
-    parser.add_argument('--embed-num-output-fact', type=int, default=3,
-                        help="Number of output nodes for embedding network: int(embed_num_output_fact * nparam).")
-    parser.add_argument('--fmpe', action='store_true', help="Use Flow-Matching Posterior Estimation.")
     parser.add_argument('--e-moped', action='store_true', help="Use e-MOPED to compress the data vector")
     parser.add_argument('--n-moped', type=int, help="Number of sims used to estimate e-moped matrix",
                         default=1000)
@@ -630,6 +665,34 @@ if __name__ == '__main__':
     parser.add_argument('--no-highpass-filter', action='store_true',
                         help='Do not remove signal below lmin in simulated maps.')
 
+    # Options for density estimation.
+    parser.add_argument('--embed', action='store_true',
+                        help="Estimate and apply embedding (compression) network")    
+    parser.add_argument('--embed-num-layers', type=int, default=2,
+                        help="Number of layers in embedding nework")
+    parser.add_argument('--embed-num-hiddens', type=int, default=25,
+                        help="Number of hidden units in each layer of the embedding network")
+    parser.add_argument('--embed-num-output-fact', type=int, default=3,
+                        help="Number of output nodes for embedding network: int(embed_num_output_fact * nparam).")
+    parser.add_argument('--fmpe', action='store_true', help="Use Flow-Matching Posterior Estimation.")
+    
+    parser.add_argument('--num-hidden-features', type=int, default=50,
+                        help='Number of elements per layer of the density estimator network.')
+    parser.add_argument('--num-transforms', type=int, default=5,
+                        help='Number of transforms when a flow is used')
+    parser.add_argument('--num-blocks', type=int, default=2,
+                        help='number of blocks used for residual net for context embedding')
+    parser.add_argument('--clip-max-norm', type=float, default=5.0,
+                        help='Value at which to clip the total gradient norm.')
+    parser.add_argument('--training-batch-size', type=int, default=200, help='Training batch size.')
+    parser.add_argument('--learning-rate', type=float, default=5e-4,
+                        help='Constant learning rate for Adam optimizer.')
+    parser.add_argument('--max-num-epochs', type=int, default=1000, help='Max number of epochs.')
+    parser.add_argument('--stop-after-epochs', type=int, default=20,
+                        help='Stop after validation loss has not improved after this many epochs.')
+    parser.add_argument('--tsnpe', action='store_true', help="Use truncated proposals for SNPE (TSNPE).")
+
+    
     # Options for adding simulations to previous run.
     parser.add_argument('--previous-data', type=str,
                         help='Path to .npy file containing previous (normalized) data vectors.')
@@ -667,11 +730,16 @@ if __name__ == '__main__':
          fiducial_beta_sync=args.fiducial_beta_sync, wavelet_type=args.wavelet_type,
          no_norm=args.no_norm, score_compress=args.score_compress, embed=args.embed,
          embed_num_layers=args.embed_num_layers, embed_num_hiddens=args.embed_num_hiddens,
-         embed_num_output_fact=args.embed_num_output_fact, fmpe=args.fmpe, e_moped=args.e_moped, n_moped=args.n_moped,
-         density_estimator_type=args.density_estimator_type,
+         embed_num_output_fact=args.embed_num_output_fact, fmpe=args.fmpe, e_moped=args.e_moped,
+         n_moped=args.n_moped, density_estimator_type=args.density_estimator_type,
          coadd_equiv_crosses=not args.no_coadd_equiv_crosses,
          apply_highpass_filter=not args.no_highpass_filter, n_test=args.n_test,
-         previous_seed_file=args.previous_seed_file, data_mean_file=args.data_mean, data_std_file=args.data_std,
-         previous_data_obs_file=args.data_obs, previous_data_file=args.previous_data,
-         previous_params_file=args.previous_params)
+         previous_seed_file=args.previous_seed_file, data_mean_file=args.data_mean,
+         data_std_file=args.data_std, previous_data_obs_file=args.data_obs,
+         previous_data_file=args.previous_data, previous_params_file=args.previous_params,
+         num_hidden_features=args.num_hidden_features, num_transforms=args.num_transforms,
+         num_blocks=args.num_blocks, clip_max_norm=args.clip_max_norm,
+         training_batch_size=args.training_batch_size, learning_rate=args.learning_rate,
+         max_num_epochs=args.max_num_epochs, stop_after_epochs=args.stop_after_epochs,
+         tsnpe=args.tsnpe)
     
