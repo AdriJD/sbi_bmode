@@ -362,7 +362,6 @@ def main(path_params, path_data, path_data_obs, odir, imgdir, config, n_samples,
             opj(imgdir, 'corner.png'), samples, prior_samples, config, cosmo_only=cosmo_only)
         np.save(opj(odir, f'samples.npy'), samples)
     
-    # Save samples.
     with open(opj(odir, 'posterior.pkl'), "wb") as handle:
         pickle.dump(posterior, handle)
 
@@ -439,7 +438,7 @@ def run_optuna(trial, path_params, path_data, path_data_obs, odir_base, config, 
                 dropout_probability=dropout_probability, use_batch_norm=use_batch_norm,
                 embed=embed,
                 embed_num_layers=embed_num_layers, embed_num_out=embed_num_out,
-                embed_num_hiddens=embed_num_hiddens, e_moped=e_moped)
+                embed_num_hiddens=embed_num_hiddens, e_moped=e_moped, cosmo_only=True) # NOTE
 
     
     # Save trial parameters.
@@ -482,7 +481,8 @@ if __name__ == '__main__':
                                          args.odir, config, args.n_samples)
     sampler = optuna.samplers.TPESampler(multivariate=True)
     study = optuna.create_study(study_name='test_study', storage=storage, direction="minimize", load_if_exists=True)
-    study.optimize(objective, n_trials=8)
+    #study.optimize(objective, n_trials=8)
+    study.optimize(objective, n_trials=4) # NOTE NOTE
 
     comm.barrier()
     if comm.rank == 0:

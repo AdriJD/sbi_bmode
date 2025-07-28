@@ -115,14 +115,14 @@ run60	SNPE 1000 x 30, config18, like run52
 run61	HILC like run52
 run62	SNPE 5000 * 6, config18, like run52, different network compared to run60
 run63	TSNPE 1000 * 10, config18
+run64	TSNPE 1000 * 10, config18 for HILC
 
-run52bt	test set with config20 otherwise same as 52b
-run56t 	test set with config20 otherwise same as 56
-run57t	test set with config20 otherwise same as 57
-run58t	test set with config20 otherwise same as 58
-run59t	test set with config20 otherwise same as 59
-run61t	test set with config20 otherwise same as 61
-
+run52bt	test set with config21 otherwise same as 52b
+run56t 	test set with config21 otherwise same as 56
+run57t	test set with config21 otherwise same as 57
+run58t	test set with config21 otherwise same as 58
+run59t	test set with config21 otherwise same as 59
+run61t	test set with config21 otherwise same as 61
 
 mcmc33  
 
@@ -156,7 +156,6 @@ run47_optuna_c same as b but with no early stopping
 run48_optuna : optuna for run48, same as run47_optuna
 run48_optuna_b : like run48 but with same data_obs seed as run49
 
-
 run49_optuna : optuna for run49
 run50_optuna : optuna for run50
 run51_optuna : optuna for run51
@@ -166,6 +165,7 @@ run53_optuna : optuna for run53
 run55_optuna : optuna for run55
 
 run52b_optuna : optuna for run52b
+run52b_optuna_b : optuna for run52b, but only targetting r and Alens
 run55b_optuna :	optuna for run55b
 run56_optuna  : optuna for run56
 run57_optuna  : optuna for run57
@@ -173,12 +173,23 @@ run58_optuna  : optuna for run58
 run59_optuna  : optuna for run59
 run61_optuna  :	optuna for run61
 
+sample52bt : sample the 52bt test set
+sample56t : sample the 56t test set
+sample57t : sample the 57t test set
+sample58t : sample the 58t test set
+sample59t : sample the 59t test set
+sample61t : sample the 61t test set
+
+sample52bt_b : sample the 52bt test set with the run52b_optuna_b cosmo_only posterior
+
+# THESE WERE ALL NOT NEEDED...##
 run52bt_optuna : optuna for run52bt
 run56t_optuna :  optuna for run56t
 run57t_optuna :  optuna for run57t
 run58t_optuna : optuna for run58t
 run59t_optuna : optuna for run59t
 run61t_optuna : optuna for run61t
+####
 
 mcmc41	     : mcmc for run41
 checkcov41   : cov check for run41

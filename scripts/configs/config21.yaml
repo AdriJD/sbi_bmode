@@ -19,8 +19,8 @@ fixed_params:
 
 params:
   r_tensor:
-    prior_type: "HalfNormal"
-    prior_params: [0.02]
+    prior_type: "TruncatedNormal"
+    prior_params: [0.01, 0.0001, 0, 0.1]
     true_value: 0.01
   A_lens:
     prior_type: "TruncatedNormal"

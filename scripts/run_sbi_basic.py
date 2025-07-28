@@ -561,15 +561,24 @@ def main(odir, config, specdir, seed, n_train, n_samples, n_rounds, pyilcdir, us
             # For SNPE.
             posterior = posterior.set_default_x(x_obs)
 
-            if tsnpe:
-                accept_reject_fn = get_density_thresholder(posterior, quantile=1e-4)
-                proposal = RestrictedPrior(prior, accept_reject_fn, sample_with="rejection")
-            else:
-                # SNPE-C.
-                proposal = posterior
+            #if tsnpe:
+            #    accept_reject_fn = get_density_thresholder(posterior, quantile=1e-4)
+            #    proposal = RestrictedPrior(prior, accept_reject_fn, sample_with="rejection")
+            #else:
+            #    # SNPE-C.
+            proposal = posterior
             
         proposal = comm.bcast(proposal, root=0)
 
+        if tsnpe:
+            # We cannot pickle this proposal, so we cannot bcast it. But every rank
+            # needs the proposal in toder to draw sims. As workaround we can let every
+            # rank create the proposal itself, not ideal because this is a stochastic
+            # operation, but probably good enough for now.
+            accept_reject_fn = get_density_thresholder(proposal, quantile=1e-4)
+            proposal = RestrictedPrior(prior, accept_reject_fn, sample_with="rejection")
+        
+        
     if n_test is not None:
         # We are using the prior as proposal for the test set.
         theta_test, x_test, x_test_mf = simulate_for_sbi_mpi(
