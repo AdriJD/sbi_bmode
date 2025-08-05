@@ -106,16 +106,27 @@ run55	NILC run for config20 (so no gamma's) same as 52 otherwise.
 run52b	8640 extra sims for run52
 run55b	8640 extra sims for run55
 
+run52c	17280 extra sims for 52b
+run55b	17280 extra sims for 55b
+
 run56	config18 but with just NILC
 run57	config18 no dbd or dbs maps or deprojection
 run58	config18 with NILC + d + s deproj but no maps
 run59	config18 with NILC + d + s + dbd + dbs deproj but no maps
 
+run56c	17280 extra sims for run56
+run57c	17280 extra sims for run57
+run58c	17280 extra sims for run58
+run59c	17280 extra sims for run59
+
 run60	SNPE 1000 x 30, config18, like run52
 run61	HILC like run52
+run61c	17280 extra sims for run61
 run62	SNPE 5000 * 6, config18, like run52, different network compared to run60
 run63	TSNPE 1000 * 10, config18
 run64	TSNPE 1000 * 10, config18 for HILC
+
+run65	NILC cmb + d + s + dbd + dbs config22, 47424 sims
 
 run52bt	test set with config21 otherwise same as 52b
 run56t 	test set with config21 otherwise same as 56
@@ -172,6 +183,22 @@ run57_optuna  : optuna for run57
 run58_optuna  : optuna for run58
 run59_optuna  : optuna for run59
 run61_optuna  :	optuna for run61
+
+run52c_optuna : optuna for run52c
+run55c_optuna : optuna for run55c
+run56c_optuna : optuna for run56c
+run57c_optuna : optuna for run57c
+run58c_optuna : optuna for run58c
+run59c_optuna : optuna for run59c
+run61c_optuna : optuna for run61c
+
+run52c_optuna_b : optuna for run52c cosmo_only
+run55c_optuna_b : optuna for run55c cosmo_only
+run56c_optuna_b : optuna for run56c cosmo_only
+run57c_optuna_b : optuna for run57c cosmo_only
+run58c_optuna_b : optuna for run58c cosmo_only
+run59c_optuna_b : optuna for run59c cosmo_only
+run61c_optuna_b : optuna for run61c cosmo_only
 
 sample52bt : sample the 52bt test set
 sample56t : sample the 56t test set

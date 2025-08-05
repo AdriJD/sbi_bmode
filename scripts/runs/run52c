@@ -1,0 +1,45 @@
+#!/bin/bash
+#SBATCH --job-name=run52c
+#SBATCH --nodes=6
+#SBATCH --ntasks-per-node=72
+#SBATCH --cpus-per-task=1
+#SBATCH --ntasks-per-core=1
+#SBATCH --time=08:00:00
+
+export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
+
+module purge
+module load adri_gcc
+module load adri_base
+source $HOME/.pyenv/versions/sbi_bmode/bin/activate
+
+TAG=run52c
+ANADIR=${HOME}/local/cca_project/scripts
+ODIR=${HOME}/project/so/20240521_sbi_bmode/${TAG}
+SPECDIR=${HOME}/local/cca_project/data
+CONFIGDIR=${HOME}/local/cca_project/scripts/configs
+PYILCDIR=${HOME}/local/pyilc
+
+CONFIG=${CONFIGDIR}/config18.yaml
+
+ODIR_PREV=${HOME}/project/so/20240521_sbi_bmode/run52b
+PREV_DATA=${ODIR_PREV}/data_draws_round_000.npy
+PREV_PARAMS=${ODIR_PREV}/param_draws_round_000.npy
+DATA_MEAN=${ODIR_PREV}/data_mean.npy
+DATA_STD=${ODIR_PREV}/data_std.npy
+DATA_OBS=${ODIR_PREV}/data_norm.npy
+
+export JAX_ENABLE_X64=True
+export JAX_DEBUG_NANS=True
+export JAX_PLATFORMS=cpu 
+
+NROUNDS=1
+NTRAIN_PER_ROUND=17280
+FID_BETA=1.5
+FID_T=19.6
+FID_BETA_SYNC=-3.0
+SEED=5200
+
+srun -u --cpu-bind=cores -c $SLURM_CPUS_PER_TASK python ${ANADIR}/run_sbi_basic.py --odir ${ODIR} --config ${CONFIG} --specdir ${SPECDIR} --n_train ${NTRAIN_PER_ROUND} --n_samples 50000 --n_rounds ${NROUNDS} --pyilcdir ${PYILCDIR} --fiducial_beta ${FID_BETA} --fiducial_T_dust ${FID_T} --fiducial_beta_sync ${FID_BETA_SYNC} --deproj_dust --deproj_dbeta --deproj_sync --deproj_dbeta_sync --use_dbeta_map --use_sync_map --use_dbeta_sync_map --seed ${SEED} --previous-data ${PREV_DATA} --previous-params ${PREV_PARAMS} --data-obs ${DATA_OBS} --data-mean ${DATA_MEAN} --data-std ${DATA_STD}
+
+cp ./slurm-${SLURM_JOB_ID}.out ${ODIR}/

@@ -367,7 +367,8 @@ def main(path_params, path_data, path_data_obs, odir, imgdir, config, n_samples,
 
     return best_validation_loss
 
-def run_optuna(trial, path_params, path_data, path_data_obs, odir_base, config, n_samples):
+def run_optuna(trial, path_params, path_data, path_data_obs, odir_base, config, n_samples,
+               cosmo_only=False):
     '''
     Run one trial for the optimizer.
 
@@ -387,6 +388,8 @@ def run_optuna(trial, path_params, path_data, path_data_obs, odir_base, config, 
         Dictionary with "data", "fixed_params" and "params" keys.
     n_samples : int
         Number of posterior draws.
+    cosmo_only : bool, optional
+        Create a posterior of only r and Alens.
 
     Returns
     -------
@@ -438,7 +441,7 @@ def run_optuna(trial, path_params, path_data, path_data_obs, odir_base, config, 
                 dropout_probability=dropout_probability, use_batch_norm=use_batch_norm,
                 embed=embed,
                 embed_num_layers=embed_num_layers, embed_num_out=embed_num_out,
-                embed_num_hiddens=embed_num_hiddens, e_moped=e_moped, cosmo_only=True) # NOTE
+                embed_num_hiddens=embed_num_hiddens, e_moped=e_moped, cosmo_only=cosmo_only)
 
     
     # Save trial parameters.
@@ -460,6 +463,8 @@ if __name__ == '__main__':
     parser.add_argument('--config', help="Path to config yaml file.")
     parser.add_argument('--journal')
     parser.add_argument('--n_samples', type=int, default=50000, help="samples of posterior")
+    parser.add_argument('--cosmo-only', action='store_true', help="Posterior of only r and Alens")
+    parser.add_argument('--n-trials', type=int, default=144, help="Number of trials")
 
     args = parser.parse_args()
 
@@ -478,11 +483,23 @@ if __name__ == '__main__':
         optuna.storages.journal.JournalFileBackend(args.journal))
 
     objective = lambda trial: run_optuna(trial, args.params, args.data, args.data_obs,
-                                         args.odir, config, args.n_samples)
+                                         args.odir, config, args.n_samples, args.cosmo_only)
     sampler = optuna.samplers.TPESampler(multivariate=True)
     study = optuna.create_study(study_name='test_study', storage=storage, direction="minimize", load_if_exists=True)
+
+    # Check for existing trials in study in case we're rerunning part of the study.
+    n_trials_completed = len(study.get_trials(states=[optuna.trial.TrialState.COMPLETE]))
+    n_trials = args.n_trials - n_trials_completed
+    
+    div, mod = np.divmod(n_trials, comm.size)
+    n_trials_per_rank = np.full(comm.size, div, dtype=int)
+    n_trials_per_rank[:mod] += 1    
+
+    print(n_trials_per_rank)
+    
     #study.optimize(objective, n_trials=8)
-    study.optimize(objective, n_trials=4) # NOTE NOTE
+    #study.optimize(objective, n_trials=4) # NOTE NOTE
+    study.optimize(objective, n_trials=n_trials_per_rank[comm.rank])
 
     comm.barrier()
     if comm.rank == 0:
