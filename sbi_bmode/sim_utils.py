@@ -352,8 +352,7 @@ class CMBSimulator():
         cov_ell = spectra_utils.apply_beam_to_freq_cov(cov_ell, self.b_ells)
 
         cov_bin = spectra_utils.bin_spectrum(
-            cov_ell, np.arange(self.lmax+1), self.bins, self.lmin, self.lmax,
-            use_jax=True)
+            cov_ell, np.arange(self.lmax+1), self.bins, use_jax=True)
 
         return cov_bin
 
@@ -376,7 +375,7 @@ class CMBSimulator():
         out[:] = np.eye(self.nfreq)[:,:,np.newaxis] * self.noise_cov_ell[:,1,1]
 
         cov_bin = spectra_utils.bin_spectrum(
-            out, np.arange(self.lmax+1), self.bins, self.lmin, self.lmax, use_jax=use_jax)
+            out, np.arange(self.lmax+1), self.bins, use_jax=use_jax)
 
         return cov_bin
 
@@ -423,10 +422,16 @@ class CMBSimulator():
 
         Returns
         -------
-        data : (ndata) array
-            Data realization.
-        data_mf : (ndata_mf) array, optional
-            Multi-frequency data, only if `also_return_mf_data` is True.
+        out_dict : dict
+            Output dictionary with following key-value pairs:
+                data : (ndata) array
+                    Data realization.
+                data_mf : (ndata_mf) array, optional
+                    Multi-frequency data, only if `also_return_mf_data` is True.
+                gamma_dust_ell : (lmax + 1) array, optional
+                    Realization of the gamma_dust power spectrum
+                gamma_sync_ell : (lmax + 1) array, optional
+                    Realization of the gamma_sync power spectrum
         '''
 
         if seed == -1:
@@ -476,9 +481,9 @@ class CMBSimulator():
             if self.pyilcdir: 
                 spectra_nilc = coadd(spectra_nilc, self.sels_to_coadd)
 
-        data_mf = get_final_data_vector(spectra_mf, self.bins, self.lmin, self.lmax)
+        data_mf = get_final_data_vector(spectra_mf, self.bins)
         if self.pyilcdir:
-            data_nilc = get_final_data_vector(spectra_nilc, self.bins, self.lmin, self.lmax)            
+            data_nilc = get_final_data_vector(spectra_nilc, self.bins)
 
         if self.norm_params:
             data_mf = self.get_norm_data(data_mf)
@@ -628,6 +633,8 @@ def get_beta_map(minfo, ainfo, beta0, amp, gamma, seed, ell_0=1, ell_cutoff=1):
     -------
     beta_map : (npix) array
         Beta map, including monopole of beta.
+    beta_cl : (lmax + 1) array
+        Realization of the beta power spectrum.
     '''
 
     seed = np.random.default_rng(seed=seed)
@@ -635,10 +642,18 @@ def get_beta_map(minfo, ainfo, beta0, amp, gamma, seed, ell_0=1, ell_cutoff=1):
     cls = get_delta_beta_cl(amp, gamma, ainfo.lmax, ell_0, ell_cutoff)
     alm_beta = alm_utils.rand_alm(cls, ainfo, seed, dtype=np.complex128)
 
+    # Include monopole. # WHAT IS THE SHAPE....
+    assert alm_beta.ndim == 1
+    alm_beta[0] = np.sqrt(4 * np.pi) * beta0
+
+    # alm2cl......
+    beta_cl = ainfo.alm2cl(alm_beta)
+    
     map_beta = np.zeros((minfo.npix))
     sht.alm2map(alm_beta, map_beta, ainfo, minfo, 0)
 
-    return map_beta + beta0
+    #return map_beta + beta0
+    return map_beta, beta_cl
 
 def gen_data(A_d_BB, alpha_d_BB, beta_dust, freq_pivot_dust, temp_dust,
              r_tensor, A_lens, freqs, seed, nsplit, cov_noise_ell,
@@ -707,8 +722,14 @@ def gen_data(A_d_BB, alpha_d_BB, beta_dust, freq_pivot_dust, temp_dust,
 
     Returns
     -------
-    data : (nsplit, nfreq, npol, npix)
-        Simulated data.
+    out_dict : dict
+        Output dictionary with following key-value pairs:
+            data : (nsplit, nfreq, npol, npix)
+                Simulated data.
+            gamma_dust_ell : (lmax + 1) array, optional
+                Realization of the gamma_dust power spectrum
+            gamma_sync_ell : (lmax + 1) array, optional
+                Realization of the gamma_sync power spectrum
     '''
 
     nfreq = len(freqs)
@@ -1164,7 +1185,7 @@ def coadd(spec, sels_to_coadd):
 
     return final_spectra
 
-def get_final_data_vector(spec, bins, lmin, lmax):
+def get_final_data_vector(spec, bins):
     '''
     Create data vector by binning and flattening spectra.
 
@@ -1174,10 +1195,6 @@ def get_final_data_vector(spec, bins, lmin, lmax):
         Input spectra.
     bins : (nbin + 1) array
         Output bins. Specify the rightmost edge.
-    lmin : int
-        Do not use multipoles below lmin.
-    lmax : int
-        Do not use multipoles below lmax.
 
     Returns
     -------
@@ -1191,7 +1208,7 @@ def get_final_data_vector(spec, bins, lmin, lmax):
 
     for idxs in np.ndindex(preshape):
 
-        out[idxs] = spectra_utils.bin_spectrum(spec[idxs], ells, bins, lmin, lmax)
+        out[idxs] = spectra_utils.bin_spectrum(spec[idxs], ells, bins)
 
     return out.reshape(-1)
 

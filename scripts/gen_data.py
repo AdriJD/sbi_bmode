@@ -67,7 +67,7 @@ for A_lens in [0, 1, 10]:
                               cov_scalar_ell, cov_tensor_ell, minfo, ainfo)
     spectra = sim_utils.estimate_spectra(omap, minfo, ainfo)
 
-    data = sim_utils.get_final_data_vector(spectra, bins, lmin, lmax)
+    data = sim_utils.get_final_data_vector(spectra, bins)
 
     ax.plot(data, label=f'{A_lens}', lw=0.5)
 ax.set_yscale('log')

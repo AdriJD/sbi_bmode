@@ -57,7 +57,7 @@ def simulator(r_tensor=0.1, A_lens=1, A_d_BB=5, alpha_d_BB=-0.2, beta_dust=1.59,
                             cov_scalar_ell, cov_tensor_ell, minfo, ainfo)
     spectra = sim_utils.estimate_spectra(omap, minfo, ainfo)
 
-    data = sim_utils.get_final_data_vector(spectra, bins, lmin, lmax)
+    data = sim_utils.get_final_data_vector(spectra, bins)
 
     if plotdata:
         fig, ax = plt.subplots(dpi=300, constrained_layout=True)

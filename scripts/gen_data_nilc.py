@@ -90,7 +90,7 @@ nilc_maps = nilc_utils.get_nilc_maps(pyilc_path, map_tmpdir, nsplit, nside,
 
 spectra = sim_utils.estimate_spectra_nilc(nilc_maps, minfo, ainfo)
 
-data = sim_utils.get_final_data_vector(spectra, bins, lmin, lmax)
+data = sim_utils.get_final_data_vector(spectra, bins)
 
 fig, ax = plt.subplots(dpi=300, constrained_layout=True)
 ax.plot(data)

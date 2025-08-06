@@ -245,7 +245,7 @@ def get_sqrt_ell_shape(lmax, alpha, ell_pivot=80):
     
     return out
 
-def bin_spectrum(spec, ells, bins, lmin, lmax, use_jax=False):
+def bin_spectrum(spec, ells, bins, use_jax=False):
     '''
     Bin input spectra.
     
@@ -257,10 +257,6 @@ def bin_spectrum(spec, ells, bins, lmin, lmax, use_jax=False):
         Multipole array corresponding to the spectra.
     bins : (nbin + 1) array
         Output bins. Specify the rightmost edge.
-    lmin : int
-        Do not use multipoles below lmin.
-    lmax : int
-        Do not use multipoles below lmax.    
     
     Returns
     -------
@@ -279,10 +275,10 @@ def bin_spectrum(spec, ells, bins, lmin, lmax, use_jax=False):
 
         if use_jax:
             out = out.at[idxs].set(
-                jnp.histogram(ells, bins=bins, range=(lmin, lmax+1), weights=spec[idxs])[0] /
-                jnp.histogram(ells, bins=bins, range=(lmin, lmax+1))[0])
+                jnp.histogram(ells, bins=bins, weights=spec[idxs])[0] /
+                jnp.histogram(ells, bins=bins)[0])
         else:
-            out[idxs] = binned_statistic(ells, spec[idxs], bins=bins, range=(lmin, lmax+1))[0]
+            out[idxs] = binned_statistic(ells, spec[idxs], bins=bins)[0]
         
     return out
 
@@ -452,8 +448,7 @@ def get_dust_sync_cross_spectra(rho_ds, amp_dust, alpha_dust, amp_sync, alpha_sy
     out = out.at[:].set(
         rho_ds * jnp.sqrt(amp_dust * amp_sync) * get_sqrt_ell_shape(lmax, alpha_dust) \
                           * get_sqrt_ell_shape(lmax, alpha_sync)[jnp.newaxis,jnp.newaxis,:])
-    
-    
+        
     get_sed1 = lambda freq: get_sed_dust(freq, beta_dust, temp, freq_pivot_dust)
     get_sed2 = lambda freq: get_sed_sync(freq, beta_sync, freq_pivot_sync)
 

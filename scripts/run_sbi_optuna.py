@@ -102,7 +102,7 @@ class CMBSimulator():
             self.cov_scalar_ell, self.cov_tensor_ell, self.minfo, self.ainfo)
         spectra = sim_utils.estimate_spectra(omap, self.minfo, self.ainfo)
 
-        data = sim_utils.get_final_data_vector(spectra, self.bins, self.lmin, self.lmax)
+        data = sim_utils.get_final_data_vector(spectra, self.bins)
 
         return data
 
