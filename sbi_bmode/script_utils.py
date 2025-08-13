@@ -1,8 +1,10 @@
 import os
 import errno
 
+import numpy as np
 import torch
 from torch.distributions import Normal, HalfNormal
+from mpi4py.util import dtlib
 
 from sbi_bmode import custom_distributions
 
@@ -145,3 +147,54 @@ def symlink_force(target, link_name):
             os.symlink(target, link_name)
         else:
             raise e
+
+def gatherv_array(array_on_rank, comm, root=0):
+    '''
+    Gather unequal-sized numpy arrays on root rank using MPI.
+
+    Parameters
+    ----------
+    array_on_rank : (num_on_rank, ...) array
+        Array on each rank to be gathererd to root.
+    comm : mpi4py.MPI.Comm object
+        MPI communicator.
+    root : int, optional
+        The index of the root rank.
+
+    Returns
+    -------
+    array_full : (num_total, ...) array, None
+        Full array on root rank, None on others.
+    '''
+
+    num_per_rank = comm.allgather(array_on_rank.shape[0])
+    num_per_rank = np.asarray(num_per_rank, dtype=np.int64)
+
+    dtype_per_rank = comm.allgather(array_on_rank.dtype)
+    if comm.rank == root:
+        assert all(x == dtype_per_rank[0] for x in dtype_per_rank)
+    dtype = dtype_per_rank[0]
+
+    postshape_per_rank = comm.allgather(array_on_rank.shape[1:])
+    if comm.rank == root:        
+        assert all(x == postshape_per_rank[0] for x in postshape_per_rank)
+    postshape_size = np.prod(np.asarray(postshape_per_rank[0], dtype=np.int64))
+    
+    if comm.rank == root:
+        num_total = np.sum(num_per_rank)
+        array_full = np.zeros(num_total * postshape_size, dtype=dtype)
+    else:
+        array_full = None
+        
+    offsets = np.zeros(comm.size)    
+    offsets[1:] = np.cumsum(num_per_rank * postshape_size)[:-1]
+    comm.Gatherv(
+        sendbuf=array_on_rank,
+        recvbuf=(array_full, np.array(num_per_rank * postshape_size, dtype=int),
+                 np.array(offsets, dtype=int), dtlib.from_numpy_dtype(dtype)),
+        root=root)
+
+    if comm.rank == root:
+        array_full = array_full.reshape(num_total, *postshape_per_rank[0])
+
+    return array_full

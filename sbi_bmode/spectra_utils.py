@@ -256,7 +256,7 @@ def bin_spectrum(spec, ells, bins, use_jax=False):
     ells :
         Multipole array corresponding to the spectra.
     bins : (nbin + 1) array
-        Output bins. Specify the rightmost edge.
+        Output bins. Specify left edges and the rightmost edge.
     
     Returns
     -------

@@ -53,12 +53,19 @@ def simulate_for_sbi_mpi(simulator, proposal, param_names, num_sims, ndata, seed
 
     Returns
     -------
-    theta : (num_sims, ntheta) torch tensor, None
-        Parameters draws, only on root rank.
-    sims : (num_sims, ndata) torch tensor, None
-        Data draws, only on root rank.
-    sims_mf : (num_sims, ndata_mf) torch tensor, optional
-        Multi-frequency data, only on root rank and only if `also_return_mf_data` is set.
+    out_dict: dict, None
+        Output dictionary with following key-value pairs. Only on root rank.
+            theta : (num_sims, ntheta) torch tensor
+                Parameter draws.
+            sims : (num_sims, ndata) torch tensor
+                Data draws.
+            sims_mf : (num_sims, ndata_mf) torch tensor, optional
+                Multi-frequency data, only on root rank and only if 
+                also_return_mf_data` is set.
+            gamma_dust_ell : (lmax + 1) array, optional
+                Realizations of the gamma_dust power spectrum
+            gamma_sync_ell : (lmax + 1) array, optional
+                Realizations of the gamma_sync power spectrum            
     '''
 
     div, mod = np.divmod(num_sims, comm.size)
@@ -73,11 +80,19 @@ def simulate_for_sbi_mpi(simulator, proposal, param_names, num_sims, ndata, seed
     if also_return_mf_data:
         sims_mf = np.zeros((num_sims_per_rank[comm.rank], simulator.size_data_mf))
 
+    gamma_dust_ell_array, gamma_sync_ell_array = None, None
+    if 'amp_beta_dust' in param_names:
+        gamma_dust_ell_array =  np.zeros(
+            (num_sims_per_rank[comm.rank], simulator.lmax+1))
+    if 'amp_beta_sync' in param_names:
+        gamma_sync_ell_array =  np.zeros(
+            (num_sims_per_rank[comm.rank], simulator.lmax+1))
+    
     for idx, theta in enumerate(thetas):
         print(f'{comm.rank=}, {idx=}, {theta=}')
         theta_dict = dict(zip(param_names, theta))
 
-        draw = simulator.draw_data(
+        draw_data_dict = simulator.draw_data(            
             theta_dict['r_tensor'],
             theta_dict['A_lens'],
             theta_dict['A_d_BB'],
@@ -94,8 +109,9 @@ def simulate_for_sbi_mpi(simulator, proposal, param_names, num_sims, ndata, seed
             rho_ds=theta_dict.get('rho_ds'),
             also_return_mf_data=also_return_mf_data)
 
+        draw = draw_data_dict['data']
         if also_return_mf_data:
-            draw, draw_mf = draw
+            draw_mf = draw_data_dict['data_mf']
         
         if mat_compress is not None:
             draw = np.dot(mat_compress, draw)
@@ -105,52 +121,39 @@ def simulate_for_sbi_mpi(simulator, proposal, param_names, num_sims, ndata, seed
         if also_return_mf_data:
             sims_mf[idx] = draw_mf
 
-    if comm.rank == 0:
-        thetas_full = np.zeros(num_sims * ntheta, dtype=np.float64)
-        sims_full = np.zeros(num_sims * ndata, dtype=np.float64)
-        if also_return_mf_data:
-            sims_full_mf = np.zeros(num_sims * simulator.size_data_mf, dtype=np.float64)
-    else:
-        thetas_full = None
-        sims_full = None
-        if also_return_mf_data:
-            sims_full_mf = None
-
-    offsets_theta = np.zeros(comm.size)
-    offsets_theta[1:] = np.cumsum(num_sims_per_rank * ntheta)[:-1]
-
-    offsets_sims = np.zeros(comm.size)
-    offsets_sims[1:] = np.cumsum(num_sims_per_rank * ndata)[:-1]
-    
-    comm.Gatherv(
-        sendbuf=thetas,
-        recvbuf=(thetas_full, np.array(num_sims_per_rank * ntheta, dtype=int),
-                 np.array(offsets_theta, dtype=int), MPI.DOUBLE), root=0)
-    comm.Gatherv(
-        sendbuf=sims,
-        recvbuf=(sims_full, np.array(num_sims_per_rank * ndata, dtype=int),
-                 np.array(offsets_sims, dtype=int), MPI.DOUBLE), root=0)
-    
+        if gamma_dust_ell_array is not None:
+            gamma_dust_ell_array[idx] = draw_data_dict['gamma_dust_ell']
+        if gamma_sync_ell_array is not None:
+            gamma_sync_ell_array[idx] = draw_data_dict['gamma_sync_ell']
+            
+    thetas_full = script_utils.gatherv_array(thetas, comm)
+    sims_full = script_utils.gatherv_array(sims, comm)    
     if also_return_mf_data:
-        offsets_sims_mf = np.zeros(comm.size)
-        offsets_sims_mf[1:] = np.cumsum(num_sims_per_rank * simulator.size_data_mf)[:-1]
-        comm.Gatherv(
-            sendbuf=sims_mf,
-            recvbuf=(sims_full_mf, np.array(num_sims_per_rank * simulator.size_data_mf, dtype=int),
-                     np.array(offsets_sims_mf, dtype=int), MPI.DOUBLE), root=0)
-
+        sims_full_mf = script_utils.gatherv_array(sims_mf, comm)
+    if gamma_dust_ell_array is not None:
+        gamma_dust_ell_full = script_utils.gatherv_array(gamma_dust_ell_array, comm)
+    if gamma_sync_ell_array is not None:
+        gamma_sync_ell_full = script_utils.gatherv_array(gamma_sync_ell_array, comm)
+        
     if comm.rank == 0:
         thetas_full = torch.as_tensor(thetas_full.reshape(num_sims, ntheta).astype(np.float32))
         sims_full = torch.as_tensor(sims_full.reshape(num_sims, ndata).astype(np.float32))
         if also_return_mf_data:
             sims_full_mf = torch.as_tensor(
                 sims_full_mf.reshape(num_sims, simulator.size_data_mf).astype(np.float32))
-
-    if also_return_mf_data:
-        out = (thetas_full, sims_full, sims_full_mf)
+               
+    if comm.rank == 0:
+        out_dict = {'theta' : thetas_full, 'sims' : sims_full}
+        if also_return_mf_data:
+            out_dict['sims_mf'] = sims_full_mf
+        if gamma_dust_ell_full is not None:
+            out_dict['gamma_dust_ell'] = gamma_dust_ell_full
+        if gamma_sync_ell_full is not None:
+            out_dict['gamma_sync_ell'] = gamma_sync_ell_full            
     else:
-        out = (thetas_full, sims_full)
-    return out
+        out_dict = None
+        
+    return out_dict
 
 def estimate_data_mean_and_std(n_norm, cmb_simulator, proposal, param_names, ndata,
                                seed, comm, score_compress, mat_compress=None):
@@ -186,10 +189,11 @@ def estimate_data_mean_and_std(n_norm, cmb_simulator, proposal, param_names, nda
         Standard deviations per element of data vector.
     '''
 
-    _, x_norm = simulate_for_sbi_mpi(
+    sim_dict = simulate_for_sbi_mpi(        
         cmb_simulator, proposal, param_names, n_norm, ndata,
-        seed, comm, score_compress, mat_compress=mat_compress)
+        seed, comm, score_compress, mat_compress=mat_compress)    
     if comm.rank == 0:
+        x_norm = sim_dict['sims']
         data_mean = np.mean(np.asarray(x_norm), axis=0)
         data_std = np.std(np.asarray(x_norm), axis=0)
     else:
@@ -309,7 +313,6 @@ def main(odir, config, specdir, seed, n_train, n_samples, n_rounds, pyilcdir, us
         Path to .npy file containing previous (normalized) data vectors.
     previous_params_file : str, optional
         Path to .npy file containing previous parameter vectors.
-
     num_hidden_features : int, optional
         Number of elements per layer of the density estimator network.
     num_transforms : int, optional
@@ -423,13 +426,15 @@ def main(odir, config, specdir, seed, n_train, n_samples, n_rounds, pyilcdir, us
     mat_compress = None
     if e_moped:
         # Draw some simulations from the prior to estimate the compression matrix.
-        theta, x = simulate_for_sbi_mpi(
+        sim_dict = simulate_for_sbi_mpi(            
             cmb_simulator, proposal, param_names, n_moped, cmb_simulator.size_data,
             rng_sims, comm, score_compress)
 
         if comm.rank == 0:
-            mat_compress = compress_utils.get_e_moped_matrix(x.numpy(), theta.numpy())
-        del theta, x
+            x_emoped = sim_dict['sims'].numpy()
+            theta_emoped = sim_dict['theta'].numpy()            
+            mat_compress = compress_utils.get_e_moped_matrix(x_emoped, theta_emoped)
+        del theta_emoped, x_emoped
         mat_compress = comm.bcast(mat_compress, root=0)
         data_size = num_parameters
 
@@ -454,7 +459,7 @@ def main(odir, config, specdir, seed, n_train, n_samples, n_rounds, pyilcdir, us
     # Define observations. Important that all ranks agree on this.
     if previous_data_obs_file is None:
         if comm.rank == 0:
-            x_obs, x_obs_mf = cmb_simulator.draw_data(
+            draw_dict = cmb_simulator.draw_data(                
                 true_params['r_tensor'],
                 true_params['A_lens'],
                 true_params['A_d_BB'],
@@ -470,6 +475,8 @@ def main(odir, config, specdir, seed, n_train, n_samples, n_rounds, pyilcdir, us
                 gamma_beta_sync=true_params.get('gamma_beta_sync'),
                 rho_ds=true_params.get('rho_ds'),
                 also_return_mf_data=True)
+            x_obs = draw_dict['data']
+            x_obs_mf = draw_dict['data_mf']
         else:
             x_obs, x_obs_mf = None, None
         x_obs = comm.bcast(x_obs, root=0)
@@ -515,12 +522,15 @@ def main(odir, config, specdir, seed, n_train, n_samples, n_rounds, pyilcdir, us
 
     # Train the SNPE. Allow n_rounds = 0 to only produce a test set.
     for ridx in range(n_rounds):
-        theta, x = simulate_for_sbi_mpi(
+        sim_dict = simulate_for_sbi_mpi(            
             cmb_simulator, proposal, param_names, n_train, data_size,
             rng_sims, comm, score_compress, mat_compress=mat_compress)
 
         if comm.rank == 0:
 
+            theta = sim_dict['theta']
+            x = sim_dict['sims']
+            
             if norm_simple:
                 x = compress_utils.normalize_simple(x, torch.as_tensor(data_mean), torch.as_tensor(data_std))
 
@@ -560,32 +570,30 @@ def main(odir, config, specdir, seed, n_train, n_samples, n_rounds, pyilcdir, us
 
             # For SNPE.
             posterior = posterior.set_default_x(x_obs)
-
-            #if tsnpe:
-            #    accept_reject_fn = get_density_thresholder(posterior, quantile=1e-4)
-            #    proposal = RestrictedPrior(prior, accept_reject_fn, sample_with="rejection")
-            #else:
-            #    # SNPE-C.
             proposal = posterior
             
         proposal = comm.bcast(proposal, root=0)
 
         if tsnpe:
             # We cannot pickle this proposal, so we cannot bcast it. But every rank
-            # needs the proposal in toder to draw sims. As workaround we can let every
+            # needs the proposal in order to draw sims. As workaround we can let every
             # rank create the proposal itself, not ideal because this is a stochastic
             # operation, but probably good enough for now.
             accept_reject_fn = get_density_thresholder(proposal, quantile=1e-4)
             proposal = RestrictedPrior(prior, accept_reject_fn, sample_with="rejection")
-        
-        
+                
     if n_test is not None:
         # We are using the prior as proposal for the test set.
-        theta_test, x_test, x_test_mf = simulate_for_sbi_mpi(
+        sim_dict = simulate_for_sbi_mpi(            
             cmb_simulator, prior, param_names, n_test, data_size,
             rng_sims, comm, score_compress, mat_compress=mat_compress, also_return_mf_data=True)
-
         if comm.rank == 0:
+            theta_test = sim_dict['theta']
+            x_test = sim_dict['sims']
+            x_test_mf = sim_dict['sims_mf']            
+            gamma_dust_ell_test = sim_dict.get('gamma_dust_ell', None)
+            gamma_sync_ell_test = sim_dict.get('gamma_sync_ell', None)
+            
             if norm_simple:
                 x_test = compress_utils.normalize_simple(x_test, torch.as_tensor(data_mean), torch.as_tensor(data_std))
         
@@ -619,7 +627,11 @@ def main(odir, config, specdir, seed, n_train, n_samples, n_rounds, pyilcdir, us
             np.save(opj(odir, 'param_draws_test.npy'), np.asarray(theta_test))
             np.save(opj(odir, 'data_draws_test.npy'), np.asarray(x_test))
             np.save(opj(odir, 'data_draws_test_mf.npy'), np.asarray(x_test_mf))
-        
+            if gamma_dust_ell_test is not None:
+                np.save(opj(odir, 'gamma_dust_ell_test.npy'), np.asarray(gamma_dust_ell_test))
+            if gamma_sync_ell_test is not None:
+                np.save(opj(odir, 'gamma_sync_ell_test.npy'), np.asarray(gamma_sync_ell_test))
+
     comm.Barrier()
 
 if __name__ == '__main__':

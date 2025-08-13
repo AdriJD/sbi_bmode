@@ -438,7 +438,7 @@ class CMBSimulator():
             seed = None
         seed = np.random.default_rng(seed=seed)
 
-        omap = gen_data(
+        out_dict = gen_data(
             A_d_BB, alpha_d_BB, beta_dust, self.freq_pivot_dust, self.temp_dust,
             r_tensor, A_lens, self.freqs, seed, self.nsplit, self.noise_cov_ell,
             self.cov_scalar_ell, self.cov_tensor_ell, self.b_ells, self.minfo, self.ainfo,
@@ -447,7 +447,8 @@ class CMBSimulator():
             freq_pivot_sync=self.freq_pivot_sync, amp_beta_sync=amp_beta_sync,
             gamma_beta_sync=gamma_beta_sync, rho_ds=rho_ds,
             signal_filter=self.highpass_filter)
-
+        omap = out_dict['data']
+        
         # We always compute this even though not always needed, but cheap enough.
         spectra_mf = estimate_spectra(omap, self.minfo, self.ainfo)
         
@@ -494,11 +495,16 @@ class CMBSimulator():
             out = data_nilc
         else:
             out = data_mf
-        if also_return_mf_data:
-            out = (out, data_mf)
                 
-        return out
+        #return out
+        out_dict['data'] = out
 
+        if also_return_mf_data:
+            #out = (out, data_mf)
+            out_dict['data_mf'] = data_mf
+
+        return out_dict
+        
     def get_norm_data(self, data):
         '''
         Subtract mean and multiply by inverse sqrt of covariance.
@@ -640,19 +646,17 @@ def get_beta_map(minfo, ainfo, beta0, amp, gamma, seed, ell_0=1, ell_cutoff=1):
     seed = np.random.default_rng(seed=seed)
 
     cls = get_delta_beta_cl(amp, gamma, ainfo.lmax, ell_0, ell_cutoff)
-    alm_beta = alm_utils.rand_alm(cls, ainfo, seed, dtype=np.complex128)
+    assert cls.ndim == 1
+    # To make sure output is (1, nelem)
+    alm_beta = alm_utils.rand_alm(cls[np.newaxis,:], ainfo, seed, dtype=np.complex128)
+    assert alm_beta.ndim == 2
+    alm_beta[0,0] += np.sqrt(4 * np.pi) * beta0
 
-    # Include monopole. # WHAT IS THE SHAPE....
-    assert alm_beta.ndim == 1
-    alm_beta[0] = np.sqrt(4 * np.pi) * beta0
-
-    # alm2cl......
-    beta_cl = ainfo.alm2cl(alm_beta)
+    beta_cl = ainfo.alm2cl(alm_beta[0])
     
     map_beta = np.zeros((minfo.npix))
     sht.alm2map(alm_beta, map_beta, ainfo, minfo, 0)
 
-    #return map_beta + beta0
     return map_beta, beta_cl
 
 def gen_data(A_d_BB, alpha_d_BB, beta_dust, freq_pivot_dust, temp_dust,
@@ -749,7 +753,6 @@ def gen_data(A_d_BB, alpha_d_BB, beta_dust, freq_pivot_dust, temp_dust,
     lmax = cov_ell.shape[-1] - 1
     assert ainfo.lmax == lmax
     
-    #cov_dust_ell = np.zeros_like(cov_ell)
     if A_s_BB is not None:
         ncomp_fg = 2
     else:
@@ -786,13 +789,15 @@ def gen_data(A_d_BB, alpha_d_BB, beta_dust, freq_pivot_dust, temp_dust,
         sht.alm2map(alm_tmp, dust_map, ainfo, minfo, 2)
 
         # Generate the dust beta map.
-        beta_dust = get_beta_map(minfo, ainfo, beta_dust, amp_beta_dust, gamma_beta_dust, rng_beta)
+        beta_dust, gamma_dust_ell = get_beta_map(
+            minfo, ainfo, beta_dust, amp_beta_dust, gamma_beta_dust, rng_beta)
         
         if A_s_BB is not None:
             alm_tmp[1] = fg_alm[1]
             sync_map = np.zeros((2, minfo.npix))
             sht.alm2map(alm_tmp, sync_map, ainfo, minfo, 2)            
-            beta_sync = get_beta_map(minfo, ainfo, beta_sync, amp_beta_sync, gamma_beta_sync, rng_beta)
+            beta_sync, gamma_sync_ell = get_beta_map(
+                minfo, ainfo, beta_sync, amp_beta_sync, gamma_beta_sync, rng_beta)
         else:
             sync_map, beta_sync = None, None
 
@@ -806,7 +811,9 @@ def gen_data(A_d_BB, alpha_d_BB, beta_dust, freq_pivot_dust, temp_dust,
             freq, cov_noise_ell, beta_dust, temp_dust, freq_pivot_dust,
             cmb_alm, fg_alm, nsplit, rngs_noise, ainfo, minfo, b_ell, beta_sync=beta_sync,
             freq_pivot_sync=freq_pivot_sync)
-
+        
+        gamma_dust_ell, gamma_sync_ell = None, None
+        
     for fidx, freq in enumerate(freqs):
         
         b_ell = b_ells[fidx]
@@ -814,7 +821,13 @@ def gen_data(A_d_BB, alpha_d_BB, beta_dust, freq_pivot_dust, temp_dust,
             b_ell = b_ell * signal_filter
         out[:,fidx,:,:] = gen_data_per_freq(freq, cov_noise_ell[fidx], b_ell)
 
-    return out
+    out_dict = {'data' : out}    
+    if gamma_dust_ell is not None:
+        out_dict['gamma_dust_ell'] = gamma_dust_ell
+    if gamma_sync_ell is not None:
+        out_dict['gamma_sync_ell'] = gamma_sync_ell
+
+    return out_dict
 
 def _gen_data_per_freq_simple(freq, cov_noise_ell, beta_dust, temp_dust, freq_pivot_dust,
                               cmb_alm, fg_alm, nsplit, rngs_noise, ainfo, minfo, b_ell,
@@ -1194,7 +1207,7 @@ def get_final_data_vector(spec, bins):
     spec : (len(sels_to_coadd), 1, ellmax + 1)
         Input spectra.
     bins : (nbin + 1) array
-        Output bins. Specify the rightmost edge.
+        Output bins. Specify left edges and the rightmost edge.
 
     Returns
     -------

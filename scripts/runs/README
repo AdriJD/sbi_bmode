@@ -129,11 +129,15 @@ run64	TSNPE 1000 * 10, config18 for HILC
 run65	NILC cmb + d + s + dbd + dbs config22, 47424 sims
 
 run52bt	test set with config21 otherwise same as 52b
+run52bt2 rerun of run52bt to test new code
 run56t 	test set with config21 otherwise same as 56
 run57t	test set with config21 otherwise same as 57
 run58t	test set with config21 otherwise same as 58
 run59t	test set with config21 otherwise same as 59
 run61t	test set with config21 otherwise same as 61
+
+
+
 
 mcmc33  
 
