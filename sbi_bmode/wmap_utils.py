@@ -2,6 +2,7 @@ import numpy as np
 
 # From https://lambda.gsfc.nasa.gov/product/wmap/dr5/index.html.
 # In arcmin.
+# NOTE, table actually gives sqrt(Omega) = sqrt(2 * pi * sigma^2) = 2.506 sigma, so not quite FHWM..
 wmap_beam_fwhms = {'wK' : 52.8, 'wKa' : 39.6, 'wQ' : 30.6, 'wV' : 21., 'wW' : 13.2}
 
 # In Hz.

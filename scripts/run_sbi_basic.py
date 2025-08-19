@@ -146,9 +146,9 @@ def simulate_for_sbi_mpi(simulator, proposal, param_names, num_sims, ndata, seed
         out_dict = {'theta' : thetas_full, 'sims' : sims_full}
         if also_return_mf_data:
             out_dict['sims_mf'] = sims_full_mf
-        if gamma_dust_ell_full is not None:
+        if gamma_dust_ell_array is not None:
             out_dict['gamma_dust_ell'] = gamma_dust_ell_full
-        if gamma_sync_ell_full is not None:
+        if gamma_sync_ell_array is not None:
             out_dict['gamma_sync_ell'] = gamma_sync_ell_full            
     else:
         out_dict = None
@@ -227,8 +227,8 @@ def main(odir, config, specdir, seed, n_train, n_samples, n_rounds, pyilcdir, us
         Path to data directory containing power spectrum files.
     seed : int
         Global seed from which all RNGs are seeded.
-    n_train : int
-        Number of simulations to draw.
+    n_train : int, (n_rounds) array-like
+        Number of simulations to draw per round or list with number for each round
     n_samples : int
         Number of posterior samples to draw.
     n_rounds : int
@@ -368,6 +368,8 @@ def main(odir, config, specdir, seed, n_train, n_samples, n_rounds, pyilcdir, us
     if score_compress and e_moped:
         raise ValueError("Cannot have both score and e-MOPED compression.")
 
+    n_train_per_round = script_utils.preprocess_n_train(n_train, n_rounds) # Now always a list.
+    
     # Seed SBI. Annoyingly, this is using a bunch of global seeds. Every rank
     # gets a unique global seed.
     if comm.rank == 0:
@@ -523,7 +525,7 @@ def main(odir, config, specdir, seed, n_train, n_samples, n_rounds, pyilcdir, us
     # Train the SNPE. Allow n_rounds = 0 to only produce a test set.
     for ridx in range(n_rounds):
         sim_dict = simulate_for_sbi_mpi(            
-            cmb_simulator, proposal, param_names, n_train, data_size,
+            cmb_simulator, proposal, param_names, n_train_per_round[ridx], data_size,
             rng_sims, comm, score_compress, mat_compress=mat_compress)
 
         if comm.rank == 0:
@@ -669,7 +671,8 @@ if __name__ == '__main__':
                          value to build NILC maps, required if sync/dbeta_sync maps/deprojection are used.")    
     parser.add_argument('--seed', type=int, default=0,
                         help="Random seed for the training data.")
-    parser.add_argument('--n_train', type=int, default=1000, help="training samples for SNPE")
+    parser.add_argument('--n_train', type=int, default=1000, nargs='+', help="Number of simulations to generate \
+                        for SNPE. Specify a single number for all rounds, or a number for each round.")
     parser.add_argument('--n_samples', type=int, default=10000, help="samples of posterior")
     parser.add_argument('--n_rounds', type=int, default=1, help="number of sequential rounds")
     parser.add_argument('--n_test', type=int, help='Number of additional data draws written to disk.')    
@@ -712,7 +715,6 @@ if __name__ == '__main__':
     parser.add_argument('--stop-after-epochs', type=int, default=20,
                         help='Stop after validation loss has not improved after this many epochs.')
     parser.add_argument('--tsnpe', action='store_true', help="Use truncated proposals for SNPE (TSNPE).")
-
     
     # Options for adding simulations to previous run.
     parser.add_argument('--previous-data', type=str,

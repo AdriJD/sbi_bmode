@@ -88,7 +88,7 @@ def plot_posterior(opath, samples, config, param_truths, cosmo_only=False):
     param_labels_g = [l[1:-1] for l in param_labels] # getdist will put in $.
 
     torch.manual_seed(0)
-    nsamp = 10_000
+    nsamp = 500_000
     prior_draw = draw_from_prior(prior, nsamp)
     
     param_limits = script_utils.get_param_limits(prior, param_names)
@@ -96,7 +96,8 @@ def plot_posterior(opath, samples, config, param_truths, cosmo_only=False):
     prior_samples = MCSamples(
         samples=prior_draw, names=param_names, labels=param_labels_g,
         ranges=param_limits)
-
+    prior_samples.smooth_scale_1D = 0.2
+    
     samples = MCSamples(
         samples=samples, names=param_names, labels=param_labels_g,
         ranges=param_limits)

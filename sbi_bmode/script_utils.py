@@ -198,3 +198,30 @@ def gatherv_array(array_on_rank, comm, root=0):
         array_full = array_full.reshape(num_total, *postshape_per_rank[0])
 
     return array_full
+
+def preprocess_n_train(n_train, n_rounds):
+    '''
+    Return a list with number of training samples for each round.
+
+    Parameters
+    ----------
+    n_train : int, array-like
+        Number of simulations to create, potentially specified for each round.
+    n_rounds : int
+        Number of SNPE rounds.
+
+    Returns
+    -------
+    n_train : (n_rounds) list of ints
+        Number of simulations specified for each round.
+    '''
+
+    if np.isscalar(n_train):
+        n_train = [n_train] * n_rounds
+    else:
+        if n_rounds > 0:
+            assert len(n_train) == n_rounds
+        n_train = list(n_train)
+
+    return n_train
+    

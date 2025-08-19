@@ -1,0 +1,31 @@
+#!/bin/bash
+#SBATCH --job-name=run69_optuna_b
+#SBATCH --nodes=4
+#SBATCH --ntasks-per-node=18
+#SBATCH --cpus-per-task=4
+#SBATCH --ntasks-per-core=1
+#SBATCH --time=02:00:00
+
+export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
+
+module purge
+module load adri_gcc
+module load adri_base
+source $HOME/.pyenv/versions/sbi_bmode/bin/activate
+
+TAG=run69_optuna_b
+ANADIR=${HOME}/local/cca_project/scripts
+ODIR=${HOME}/project/so/20240521_sbi_bmode/${TAG}
+IDIR=${HOME}/project/so/20240521_sbi_bmode/run69
+
+CONFIG=${IDIR}/config.yaml
+PARAMS=${IDIR}/param_draws_round_000.npy
+DATA=${IDIR}/data_draws_round_000.npy
+DATA_OBS=${IDIR}/data_norm.npy
+JOURNAL=${ODIR}/optuna_study.journal
+
+export JAX_ENABLE_X64=True
+export JAX_DEBUG_NANS=True
+export JAX_PLATFORMS=cpu 
+
+srun -u --cpu-bind=cores -c $SLURM_CPUS_PER_TASK python ${ANADIR}/check_estimators.py --params ${PARAMS} --data ${DATA} --data-obs ${DATA_OBS} --odir ${ODIR} --config ${CONFIG} --journal ${JOURNAL} --cosmo-only

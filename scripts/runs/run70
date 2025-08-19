@@ -1,0 +1,39 @@
+#!/bin/bash
+#SBATCH --job-name=run70
+#SBATCH --nodes=12
+#SBATCH --ntasks-per-node=72
+#SBATCH --cpus-per-task=1
+#SBATCH --ntasks-per-core=1
+#SBATCH --time=08:00:00
+
+export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
+
+module purge
+module load adri_gcc
+module load adri_base
+source $HOME/.pyenv/versions/sbi_bmode/bin/activate
+
+TAG=run70
+ANADIR=${HOME}/local/cca_project/scripts
+ODIR=${HOME}/project/so/20240521_sbi_bmode/${TAG}
+SPECDIR=${HOME}/local/cca_project/data
+CONFIGDIR=${HOME}/local/cca_project/scripts/configs
+PYILCDIR=${HOME}/local/pyilc
+
+CONFIG=${CONFIGDIR}/config22.yaml
+
+export JAX_ENABLE_X64=True
+export JAX_DEBUG_NANS=True
+export JAX_PLATFORMS=cpu 
+
+NROUNDS=1
+NTRAIN_PER_ROUND=51840
+FID_BETA=1.5
+FID_T=19.6
+FID_BETA_SYNC=-3.0
+NTEST=864
+SEED=0
+
+srun -u --cpu-bind=cores -c $SLURM_CPUS_PER_TASK python ${ANADIR}/run_sbi_basic.py --odir ${ODIR} --config ${CONFIG} --specdir ${SPECDIR} --n_train ${NTRAIN_PER_ROUND} --n_samples 50000 --n_rounds ${NROUNDS} --pyilcdir ${PYILCDIR} --fiducial_beta ${FID_BETA} --fiducial_T_dust ${FID_T} --fiducial_beta_sync ${FID_BETA_SYNC} --deproj_dust --deproj_dbeta --deproj_sync --deproj_dbeta_sync --no-dust-map --seed ${SEED} --n_test ${NTEST}
+
+cp ./slurm-${SLURM_JOB_ID}.out ${ODIR}/

@@ -14,3 +14,5 @@ config19	same as 18 but with lmin = 10
 config20	like config18 but without gamma for dust and sync
 config21	like config18 but with very narrow prior for all but gamma parameters
 config22	like config18 but prior on A_d_BB centered on 28 and wider dust amps.
+config23	like config22 but without gamma for dust and sync
+config24	like config22 but with very narrow prior for all but gamma parameters

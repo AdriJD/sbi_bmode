@@ -338,6 +338,8 @@ def get_cov_prefactor(bins, lmin, lmax):
 
     ells = np.arange(lmax+1)
     num_modes = (2 * ells + 1)
+    # NOTE, these lmin, llmax parameters are not doing anything because
+    # `bins` are provided. Ideally remove.
     num_modes_per_bin = binned_statistic(
         ells, num_modes, bins=bins, range=(lmin, lmax+1), statistic='sum')[0]
 
@@ -379,7 +381,9 @@ def get_cov(signal_spectra, noise_spectra, bins, lmin, lmax, nsplit, nfreq,
         Binned noise frequency cross spectra.
     bins : (nbin + 1) array
         Bin edges.
+    lmin : int
 
+    lmax : int
 
     coadd_matrix : (n_unique, ntri)
 

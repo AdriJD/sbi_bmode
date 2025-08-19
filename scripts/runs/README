@@ -39,7 +39,6 @@ run22   NILC + deproject dust, 6x5000
 run23   NILC + deproject dust + deproject dbeta, 6x5000
 run24   like run22 but with no cmb deprojection
 
-# PAPER NILC RUNS
 run25	Template for NILC SBI runs
 run25b	rerun of run25 with sa branch
 
@@ -126,7 +125,17 @@ run62	SNPE 5000 * 6, config18, like run52, different network compared to run60
 run63	TSNPE 1000 * 10, config18
 run64	TSNPE 1000 * 10, config18 for HILC
 
-run65	NILC cmb + d + s + dbd + dbs config22, 47424 sims
+run65	NILC cmb + d + s + dbd + dbs config22, 51840 sims
+run66	like 65 but config23, so no gamma, 51840 sims
+run67	NILC only, config22, 51840 sims
+run68	NILC cmb + d + s, config22, 51840 sims
+run69	NILC cmb + d + s, deproj but no maps, config22, 51840 sims
+run70	NILC cmb + d + s + dbd + dbs deproj but no maps, config22, 51840 sims
+run71	HILC like run65
+
+run72	TSNPE like 65 1728 * 8, config22
+run73	TSNPE like 65 864 * 16, config22, different hyperparams
+run74	TSNPE like 65 864 * 6 + 3456 * 10, config22
 
 run52bt	test set with config21 otherwise same as 52b
 run52bt2 rerun of run52bt to test new code
@@ -136,6 +145,12 @@ run58t	test set with config21 otherwise same as 58
 run59t	test set with config21 otherwise same as 59
 run61t	test set with config21 otherwise same as 61
 
+run65t	test set with config24 (only varying gamma params) otherwise same as 65
+run67t	test set with config24 (only varying gamma params) otherwise same as 67
+run68t	test set with config24 (only varying gamma params) otherwise same as 68
+run69t	test set with config24 (only varying gamma params) otherwise same as 69
+run70t	test set with config24 (only varying gamma params) otherwise same as 70
+run71t	test set with config24 (only varying gamma params) otherwise same as 71
 
 
 
@@ -204,6 +219,22 @@ run58c_optuna_b : optuna for run58c cosmo_only
 run59c_optuna_b : optuna for run59c cosmo_only
 run61c_optuna_b : optuna for run61c cosmo_only
 
+run65_optuna : optuna for run65
+run66_optuna : optuna for run66
+run67_optuna : optuna for run67
+run68_optuna : optuna for run68
+run69_optuna : optuna for run69
+run70_optuna : optuna for run70
+run71_optuna : optuna for run71
+
+run65_optuna_b : optuna for run65 cosmo only
+run66_optuna_b : optuna for run66 cosmo only
+run67_optuna_b : optuna for run67 cosmo only
+run68_optuna_b : optuna for run68 cosmo only
+run69_optuna_b : optuna for run69 cosmo only
+run70_optuna_b : optuna for run70 cosmo only
+run71_optuna_b : optuna for run71 cosmo only
+
 sample52bt : sample the 52bt test set
 sample56t : sample the 56t test set
 sample57t : sample the 57t test set
@@ -211,7 +242,44 @@ sample58t : sample the 58t test set
 sample59t : sample the 59t test set
 sample61t : sample the 61t test set
 
+sample52ct : sample the 52bt test set with run52c
+sample56ct : sample the 56t test set with run56c
+sample57ct : sample the 57t test set with run57c
+sample58ct : sample the 58t test set with run58c
+sample59ct : sample the 59t test set with run59c
+sample61ct : sample the 61t test set with run61c
+
 sample52bt_b : sample the 52bt test set with the run52b_optuna_b cosmo_only posterior
+
+sample65     : sample the run65 test set
+sample66     : sample the run66 test set
+sample67     : sample the run67 test set
+sample68     : sample the run68 test set
+sample69     : sample the run69 test set
+sample70     : sample the run70 test set
+sample71     : sample the run71 test set
+
+sample65_b   : sample the run65 test set with cosmo_only
+sample66_b   : sample the run66 test set with cosmo_only
+sample67_b   : sample the run67 test set with cosmo_only
+sample68_b   : sample the run68 test set with cosmo_only
+sample69_b   : sample the run69 test set with cosmo_only
+sample70_b   : sample the run70 test set with cosmo_only
+sample71_b   : sample the run71 test set with cosmo_only
+
+sample65t    : sample the run65t test set
+sample67t    : sample the run67t test set
+sample68t    : sample the run68t test set
+sample69t    : sample the run69t test set
+sample70t    : sample the run70t test set
+sample71t    : sample the run71t test set
+
+sample65t_b  : sample the run65t test set with cosmo_only
+sample67t_b  : sample the run67t test set with cosmo_only
+sample68t_b  : sample the run68t test set with cosmo_only
+sample69t_b  : sample the run69t test set with cosmo_only
+sample70t_b  : sample the run70t test set with cosmo_only
+sample71t_b  : sample the run71t test set with cosmo_only
 
 # THESE WERE ALL NOT NEEDED...##
 run52bt_optuna : optuna for run52bt

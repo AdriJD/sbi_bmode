@@ -490,16 +490,17 @@ if __name__ == '__main__':
     # Check for existing trials in study in case we're rerunning part of the study.
     n_trials_completed = len(study.get_trials(states=[optuna.trial.TrialState.COMPLETE]))
     n_trials = args.n_trials - n_trials_completed
-    
-    div, mod = np.divmod(n_trials, comm.size)
-    n_trials_per_rank = np.full(comm.size, div, dtype=int)
-    n_trials_per_rank[:mod] += 1    
 
-    print(n_trials_per_rank)
-    
-    #study.optimize(objective, n_trials=8)
-    #study.optimize(objective, n_trials=4) # NOTE NOTE
-    study.optimize(objective, n_trials=n_trials_per_rank[comm.rank])
+    if n_trials > 0:
+        div, mod = np.divmod(n_trials, comm.size)
+        n_trials_per_rank = np.full(comm.size, div, dtype=int)
+        n_trials_per_rank[:mod] += 1    
+
+        print(n_trials_per_rank)
+
+        #study.optimize(objective, n_trials=8)
+        #study.optimize(objective, n_trials=4) # NOTE NOTE
+        study.optimize(objective, n_trials=n_trials_per_rank[comm.rank])
 
     comm.barrier()
     if comm.rank == 0:
