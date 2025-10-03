@@ -67,9 +67,8 @@ def get_prior(params_dict):
         
     return prior_combined, param_names, transforms
 
-# ADD option for multiple data files, and optionally, true parameters of same size. DO MPI over those.
 def main(odir, config, specdir, data_file, seed, n_samples, n_chains,
-         coadd_equiv_crosses=True):
+         coadd_equiv_crosses=True, param_file=None):
     '''
     Run mcmc script.
 
@@ -82,7 +81,8 @@ def main(odir, config, specdir, data_file, seed, n_samples, n_chains,
     specdir : str
         Path to data directory containing power spectrum files.
     data_file : str
-        path to .npy file containting observed spectra.
+        path to .npy file containing observed spectra. Can be one set of spectra or
+        multiple.
     seed : int
         Global seed from which all RNGs are seeded.    
     n_samples : int
@@ -90,202 +90,238 @@ def main(odir, config, specdir, data_file, seed, n_samples, n_chains,
     n_chains : int
         Number of mcmc chains.
     coadd_equiv_crosses : bool, optional
-        If set, assume we have used the mean of e.g. comp1 x comp2 and comp2 x comp1 spectra.
+        If set, assume we have used the mean of e.g. comp1 x comp2 and comp2 x comp1
+        spectra.
+    param_file : str, optional
+        Path to .npy file containing true parameters. Can be one set or mutliple
+        (same number as data_file). If not provided, uses true parameters from config.
     '''
     
     data_dict, fixed_params_dict, params_dict = script_utils.parse_config(config)
 
-    print(f'{data_dict=}')
-    print(f'{fixed_params_dict=}')
-    print(f'{params_dict=}')
+    param_names_full = [n for n in params_dict.keys()]
+    if comm.rank == 0:
+        print(f'{data_dict=}')
+        print(f'{fixed_params_dict=}')
+        print(f'{params_dict=}')
     params_dict.pop('amp_beta_dust', None)
     params_dict.pop('gamma_beta_dust', None)  
     params_dict.pop('amp_beta_sync', None)
     params_dict.pop('gamma_beta_sync', None)
 
-    print(params_dict)
     prior_combined, param_names, transforms = get_prior(params_dict)
 
     cmb_simulator = sim_utils.CMBSimulator(specdir, data_dict, fixed_params_dict,
                                            coadd_equiv_crosses=coadd_equiv_crosses)
     
-    # Get prior mean.
-    mean = prior_combined.get_mean()
-    
     # Load data.
-    data = jnp.asarray(np.load(data_file))
+    data_arr = jnp.asarray(np.load(data_file))
 
-    # Get covariance matrix
-    print(param_names)
-                
-    # NOTE actually better if we use the true parameters for the fiducial spectrum.
-    true_params = {}
-    for param_name, pd in params_dict.items():
-        true_params[param_name] = pd['true_value']    
-
-    print(f'{true_params=}')
-        
-    signal_spectra = cmb_simulator.get_signal_spectra(
-        true_params['r_tensor'], true_params['A_lens'], true_params['A_d_BB'],
-        true_params['alpha_d_BB'], true_params['beta_dust'],
-        A_s_BB=true_params.get('A_s_BB'), alpha_s_BB=true_params.get('alpha_s_BB'),
-        beta_sync=true_params.get('beta_sync'), rho_ds=true_params.get('rho_ds'))
-    noise_spectra = cmb_simulator.get_noise_spectra()
+    if data_arr.ndim == 1:
+        data_arr = data_arr[np.newaxis,:]
+    num_sims = data_arr.shape[0]
     
-    if coadd_equiv_crosses:    
-        coadd_mat = likelihood_utils.get_coadd_transform_matrix(
-            cmb_simulator.sels_to_coadd, sim_utils.get_ntri(cmb_simulator.nsplit, cmb_simulator.nfreq))
+    # Use the true parameters for the fiducial spectrum needed for the covariance matrix.    
+    if param_file is not None:
+        params = jnp.asarray(np.load(param_file))
+
+        if params.ndim == 1:
+            params[np.newaxis,:]
+        assert params.shape[0] == num_sims
+
+        # Turn this into a list of dicts. We can use param_names_full because those
+        # are in the same order as the parameters.
+        true_params_list = [dict(zip(param_names_full, p)) for p in params]
+
     else:
-        coadd_mat = None
+        # Use config.
+        true_params = {}
+        for param_name, pd in params_dict.items():
+            true_params[param_name] = pd['true_value']    
+        true_params_list = None
 
-    cov = likelihood_utils.get_cov(
-        np.asarray(signal_spectra), noise_spectra, cmb_simulator.bins, cmb_simulator.lmin,
-        cmb_simulator.lmax, cmb_simulator.nsplit, cmb_simulator.nfreq, coadd_matrix=coadd_mat)
+    idxs = np.arange(num_sims)
+    idxs_per_rank = np.array_split(idxs, comm.size)
+    num_sims_per_rank = [x.size for x in idxs_per_rank]
+
+    if comm.rank == 0:
+        print(f'{num_sims_per_rank=}')
     
-    # Invert matrix
-    icov = jnp.asarray(mat_utils.matpow(np.asarray(cov), -1))
+    # Array to gather chains per rank.
+    chains_on_rank = np.zeros(
+        (num_sims_per_rank[comm.rank], n_chains, n_samples, len(param_names)),
+        dtype=np.float32)
     
-    tri_indices = sim_utils.get_tri_indices(cmb_simulator.nsplit, cmb_simulator.nfreq)
-    if coadd_equiv_crosses:
-        data = data.reshape(coadd_mat.shape[0], -1)
-    else:
-        data = data.reshape(tri_indices.shape[0], -1)
+    for idx, ridx in enumerate(idxs_per_rank[comm.rank]):
 
-    def _logprob(params):
-        '''
-        Evaluate the posterior for a given set of parameters.
+        data = data_arr[ridx]
+        if true_params_list is not None:
+            true_params = true_params_list[ridx]
 
-        Parameters
-        ----------
-        params : dict
-            Dictionary with parameter value for each parameter.
-
-        Returns
-        -------
-        logprob : float
-            Posterior probability for input parameters.
-        '''
-
-        model = cmb_simulator.get_signal_spectra(
-            params['r_tensor'], params['A_lens'], params['A_d_BB'],
-            params['alpha_d_BB'], params['beta_dust'], A_s_BB=params.get('A_s_BB'),
-            alpha_s_BB=params.get('alpha_s_BB'), beta_sync=params.get('beta_sync'),
-            rho_ds=params.get('rho_ds'))
+        print(f'rank : {comm.rank}, {true_params=}')
         
-        loglike = likelihood_utils.loglike(
-            model, data, icov, tri_indices, coadd_matrix=coadd_mat)
+        signal_spectra = cmb_simulator.get_signal_spectra(
+            true_params['r_tensor'], true_params['A_lens'], true_params['A_d_BB'],
+            true_params['alpha_d_BB'], true_params['beta_dust'],
+            A_s_BB=true_params.get('A_s_BB'), alpha_s_BB=true_params.get('alpha_s_BB'),
+            beta_sync=true_params.get('beta_sync'), rho_ds=true_params.get('rho_ds'))
+        noise_spectra = cmb_simulator.get_noise_spectra()
 
-        ordered_params = jnp.array([params[k] for k in param_names])
-        logprior = prior_combined.log_prob(ordered_params)
-        
-        return loglike + logprior
+        if coadd_equiv_crosses:    
+            coadd_mat = likelihood_utils.get_coadd_transform_matrix(
+                cmb_simulator.sels_to_coadd, sim_utils.get_ntri(cmb_simulator.nsplit, cmb_simulator.nfreq))
+        else:
+            coadd_mat = None
 
-    def logprob_transformed(params):
-        '''
+        cov = likelihood_utils.get_cov(
+            np.asarray(signal_spectra), noise_spectra, cmb_simulator.bins, cmb_simulator.lmin,
+            cmb_simulator.lmax, cmb_simulator.nsplit, cmb_simulator.nfreq, coadd_matrix=coadd_mat)
 
-        '''
-        
-        # Loop over parameters, transform each of them and compute log oab jacobian for each.
-        params = {k: transforms[k].inv_func(v) for k, v in params.items()}
+        # Invert matrix
+        icov = jnp.asarray(mat_utils.matpow(np.asarray(cov), -1))
 
-        clipped_abs_jac = lambda transform, y : jnp.clip(
-            transform.abs_jac(y), jnp.finfo(y.dtype).smallest_normal)
-        
-        log_abs_jac = {k: clipped_abs_jac(transforms[k], v) for k, v in params.items()}
-        
-        sum_log_abs_jac = jax.tree.reduce(
-            lambda acc, x: acc + jnp.sum(x), log_abs_jac, initializer=0.0)
-        
-        logprob = _logprob(params)
-        
-        return logprob 
+        tri_indices = sim_utils.get_tri_indices(cmb_simulator.nsplit, cmb_simulator.nfreq)
+        if coadd_equiv_crosses:
+            data = data.reshape(coadd_mat.shape[0], -1)
+        else:
+            data = data.reshape(tri_indices.shape[0], -1)
 
-    def get_prior_draw_transformed(rng_key):
-        '''
-        Returns
-        -------
-        draw : dict
-            Parameter draw for each parameter
-        '''
-        
-        draw = prior_combined.sample(rng_key)
+        def _logprob(params):
+            '''
+            Evaluate the posterior for a given set of parameters.
 
-        return {k: transforms[k].func(v) for k, v in zip(param_names, draw)}
+            Parameters
+            ----------
+            params : dict
+                Dictionary with parameter value for each parameter.
 
-    num_steps = 32
+            Returns
+            -------
+            logprob : float
+                Posterior probability for input parameters.
+            '''
 
-    # Init sampler
-    rng_key = jax.random.key(seed)
-    rng_key, *init_keys = jax.random.split(rng_key, n_chains + 1)
-    init_keys = jnp.stack(init_keys)
-    
-    @jax.vmap
-    def initialize_chain(rng_key):
-        return get_prior_draw_transformed(rng_key)
+            model = cmb_simulator.get_signal_spectra(
+                params['r_tensor'], params['A_lens'], params['A_d_BB'],
+                params['alpha_d_BB'], params['beta_dust'], A_s_BB=params.get('A_s_BB'),
+                alpha_s_BB=params.get('alpha_s_BB'), beta_sync=params.get('beta_sync'),
+                rho_ds=params.get('rho_ds'))
 
-    initial_positions = initialize_chain(init_keys)
+            loglike = likelihood_utils.loglike(
+                model, data, icov, tri_indices, coadd_matrix=coadd_mat)
 
-    print(f'{initial_positions=}')    
-    
-    print('start warmup')
-    
-    def run_warmup(rng_key, initial_position):
-        warmup = blackjax.window_adaptation(
-            blackjax.hmc, logprob_transformed, is_mass_matrix_diagonal=True,
-            num_integration_steps=num_steps,
-            initial_step_size=1e-5, target_acceptance_rate=0.8)
-        
-        (state, parameters), _ = warmup.run(rng_key, initial_position, num_steps=512)
-        return state, parameters
+            ordered_params = jnp.array([params[k] for k in param_names])
+            logprior = prior_combined.log_prob(ordered_params)
 
-    rng_key, *warmup_keys = jax.random.split(rng_key, n_chains + 1)
-    warmup_keys = jnp.stack(warmup_keys)
-    states, parameters = jax.vmap(run_warmup)(warmup_keys, initial_positions)
-        
-    print(f'{states=}')
-    print(f'{parameters=}')
-    
-    params_0 = jax.tree.map(lambda x: x[0], parameters)
-    print(f'{params_0=}')
-    hmc = blackjax.hmc(logprob_transformed, **params_0)
-    
-    hmc_kernel = jax.jit(hmc.step)
+            return loglike + logprior
 
-    def inference_loop(rng_key, kernel, initial_state, num_samples):
-        @jax.jit
-        def one_step(state, rng_key):
-            state, _ = kernel(rng_key, state)
-            return state, state
+        def logprob_transformed(params):
+            '''
 
-        keys = jax.random.split(rng_key, num_samples)
-        _, states = jax.lax.scan(one_step, initial_state, keys)
+            '''
 
-        return states
+            # Loop over parameters, transform each of them and compute log oab jacobian for each.
+            params = {k: transforms[k].inv_func(v) for k, v in params.items()}
 
-    rng_key, *sample_keys = jax.random.split(rng_key, n_chains + 1)
-    sample_keys = jnp.stack(sample_keys)
+            clipped_abs_jac = lambda transform, y : jnp.clip(
+                transform.abs_jac(y), jnp.finfo(y.dtype).smallest_normal)
 
-    batched_inference_loop = jax.vmap(
-        lambda rng, state: inference_loop(rng, hmc_kernel, state, n_samples),
-        in_axes=(0, 0))
-    states = batched_inference_loop(sample_keys, states)
+            log_abs_jac = {k: clipped_abs_jac(transforms[k], v) for k, v in params.items()}
 
-    print(f'{states=}')
-    
-    mcmc_samples = states.position
+            sum_log_abs_jac = jax.tree.reduce(
+                lambda acc, x: acc + jnp.sum(x), log_abs_jac, initializer=0.0)
 
-    def apply_per_param_transform(mcmc_samples, transforms):
-        return {k: transforms[k].inv_func(v) for k, v in mcmc_samples.items()}
+            logprob = _logprob(params)
 
-    transform_fn = lambda position: apply_per_param_transform(position, transforms)
-    transformed = jax.vmap(jax.vmap(transform_fn))(mcmc_samples)
+            return logprob 
 
-    # Save samples in numpy array similar to run_sbi_basic output.
-    samples = np.zeros((n_chains, n_samples, len(param_names)))        
-    for pidx, pname in enumerate(param_names):
-        samples[:,:,pidx] = transformed[pname]
-        
-    np.save(opj(odir, 'samples.npy'), samples)
+        def get_prior_draw_transformed(rng_key):
+            '''
+            Returns
+            -------
+            draw : dict
+                Parameter draw for each parameter
+            '''
+
+            draw = prior_combined.sample(rng_key)
+
+            return {k: transforms[k].func(v) for k, v in zip(param_names, draw)}
+
+        num_steps = 32
+
+        # Init sampler
+        rng_key = jax.random.key(seed)
+        rng_key, *init_keys = jax.random.split(rng_key, n_chains + 1)
+        init_keys = jnp.stack(init_keys)
+
+        @jax.vmap
+        def initialize_chain(rng_key):
+            return get_prior_draw_transformed(rng_key)
+
+        initial_positions = initialize_chain(init_keys)
+
+        print(f'rank : {comm.rank}, {initial_positions=}')    
+
+        def run_warmup(rng_key, initial_position):
+            warmup = blackjax.window_adaptation(
+                blackjax.hmc, logprob_transformed, is_mass_matrix_diagonal=True,
+                num_integration_steps=num_steps,
+                initial_step_size=1e-5, target_acceptance_rate=0.8)
+
+            (state, parameters), _ = warmup.run(rng_key, initial_position, num_steps=512)
+            return state, parameters
+
+        rng_key, *warmup_keys = jax.random.split(rng_key, n_chains + 1)
+        warmup_keys = jnp.stack(warmup_keys)
+        states, parameters = jax.vmap(run_warmup)(warmup_keys, initial_positions)
+
+        print(f'rank : {comm.rank}, {states=}')
+        print(f'rank : {comm.rank}, {parameters=}')
+
+        params_0 = jax.tree.map(lambda x: x[0], parameters)
+        hmc = blackjax.hmc(logprob_transformed, **params_0)
+
+        hmc_kernel = jax.jit(hmc.step)
+
+        def inference_loop(rng_key, kernel, initial_state, num_samples):
+            @jax.jit
+            def one_step(state, rng_key):
+                state, _ = kernel(rng_key, state)
+                return state, state
+
+            keys = jax.random.split(rng_key, num_samples)
+            _, states = jax.lax.scan(one_step, initial_state, keys)
+
+            return states
+
+        rng_key, *sample_keys = jax.random.split(rng_key, n_chains + 1)
+        sample_keys = jnp.stack(sample_keys)
+
+        batched_inference_loop = jax.vmap(
+            lambda rng, state: inference_loop(rng, hmc_kernel, state, n_samples),
+            in_axes=(0, 0))
+        states = batched_inference_loop(sample_keys, states)
+
+        print(f'rank : {comm.rank}, {states=}')
+
+        mcmc_samples = states.position
+
+        def apply_per_param_transform(mcmc_samples, transforms):
+            return {k: transforms[k].inv_func(v) for k, v in mcmc_samples.items()}
+
+        transform_fn = lambda position: apply_per_param_transform(position, transforms)
+        transformed = jax.vmap(jax.vmap(transform_fn))(mcmc_samples)
+
+        # Save samples in numpy array similar to run_sbi_basic output.
+        #samples = np.zeros((n_chains, n_samples, len(param_names)))        
+        for pidx, pname in enumerate(param_names):
+            #samples[:,:,pidx] = transformed[pname]
+            chains_on_rank[idx,:,:,pidx] = transformed[pname].astype(np.float32)
+
+    samples = script_utils.gatherv_array(chains_on_rank, comm)
+
+    if comm.rank == 0:
+        np.save(opj(odir, 'samples.npy'), samples)
         
 if __name__ == '__main__':
 
@@ -293,7 +329,11 @@ if __name__ == '__main__':
     parser.add_argument('--odir')
     parser.add_argument('--config', help="Path to config yaml file.")
     parser.add_argument('--specdir')    
-    parser.add_argument('--data', help="Path to data .npy file.")
+    parser.add_argument('--data', help="Path to data .npy file. Can either contain a single \
+                        or multiple datasets: (num_sims, ndata) shaped.")
+    parser.add_argument('--params', help="Path to param .npy file. Can either contain a single \
+                        or multiple parameters: (num_sims, nparam) shaped. If not provided, use true \
+                        parameters from config file.")
     parser.add_argument('--seed', type=int, default=65489873156946,
                         help="Random seed for the sampler.")
     parser.add_argument('--n_samples', type=int, default=10000, help="samples per chain.")
@@ -308,4 +348,4 @@ if __name__ == '__main__':
         config = yaml.safe_load(yfile)
 
     main(args.odir, config, args.specdir, args.data, args.seed, args.n_samples, args.n_chains,
-         coadd_equiv_crosses=not args.no_coadd_equiv_crosses)
+         coadd_equiv_crosses=not args.no_coadd_equiv_crosses, param_file=args.params)

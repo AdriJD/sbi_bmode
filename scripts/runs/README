@@ -137,6 +137,10 @@ run72	TSNPE like 65 1728 * 8, config22
 run73	TSNPE like 65 864 * 16, config22, different hyperparams
 run74	TSNPE like 65 864 * 6 + 3456 * 10, config22
 
+run75	NILC cmb + d + s + dbd + dbs config25, 10368 sims with mask
+run76	NILC cmb + d + s + dbd + dbs config26, 51840 sims with mask
+run77	HILC cmb + d + s + dbd + dbs config26, 51840 sims with mask
+
 run52bt	test set with config21 otherwise same as 52b
 run52bt2 rerun of run52bt to test new code
 run56t 	test set with config21 otherwise same as 56
@@ -152,7 +156,25 @@ run69t	test set with config24 (only varying gamma params) otherwise same as 69
 run70t	test set with config24 (only varying gamma params) otherwise same as 70
 run71t	test set with config24 (only varying gamma params) otherwise same as 71
 
+run75t_d1s5 test set for run75 with d1_s5 foreground template
+run75t_d12s5 test set for run75 with d12_s5 foreground template
+run75t_d1s7 test set for run75 with d1_s7 foreground template
+run75t_d4s5 test set for run75 with d4_s5 foreground template
+run75t_d10s5 test set for run75 with d10_s5 foreground template
 
+run76t_d1s5 test set for run76 with d1_s5 foreground template with config27 (fixed r, A_L)
+run76t_d12s5 like above but with d12_s5
+run76t_d1s7 like above but with d1_s7
+run76t_d4s5 like above but with d4_s5
+run76t_d10s5 like above but with d10_s5
+run76t_d10alts5 like above but with d10alt_s5
+
+run77t_d1s5 test set for run77 with d1_s5 foreground template with config27 (fixed r, A_L)
+run77t_d12s5 like above but with d12_s5
+run77t_d1s7 like above but with d1_s7
+run77t_d4s5 like above but with d4_s5
+run77t_d10s5 like above but with d10_s5
+run77t_d10alts5 like above but with d10alt_s5
 
 mcmc33  
 
@@ -227,6 +249,10 @@ run69_optuna : optuna for run69
 run70_optuna : optuna for run70
 run71_optuna : optuna for run71
 
+run65_optuna_5000 : optuna for run65 with nsim=5000
+run65_optuna_10000 : optuna for run65 with nsim=10000
+run65_optuna_25000 : optuna for run65 with nsim=25000
+
 run65_optuna_b : optuna for run65 cosmo only
 run66_optuna_b : optuna for run66 cosmo only
 run67_optuna_b : optuna for run67 cosmo only
@@ -234,6 +260,14 @@ run68_optuna_b : optuna for run68 cosmo only
 run69_optuna_b : optuna for run69 cosmo only
 run70_optuna_b : optuna for run70 cosmo only
 run71_optuna_b : optuna for run71 cosmo only
+
+run65_optuna_b_5000 : optuna for run65 with nsim=5000 cosmo only
+run65_optuna_b_10000 : optuna for run65 with nsim=10000 cosmo only
+run65_optuna_b_25000 : optuna for run65 with nsim=25000 cosmo only
+
+run75_optuna : optuna for run75
+run76_optuna : optuna for run76
+run77_optuna : optuna for run77
 
 sample52bt : sample the 52bt test set
 sample56t : sample the 56t test set
@@ -281,6 +315,27 @@ sample69t_b  : sample the run69t test set with cosmo_only
 sample70t_b  : sample the run70t test set with cosmo_only
 sample71t_b  : sample the run71t test set with cosmo_only
 
+sample75t_d1s5    : sample the run75t_d1s5 test set with the run75 model
+sample75t_d12s5    : sample the run75t_d12s5 test set with the run75 model
+sample75t_d1s7	   : sample the run75t_d1s7 test set with the run75 model
+sample75t_d4s5	   : sample the run75t_d4s5 test set with the run75 model
+sample75t_d10s5	   : sample the run75t_d10s5 test set with the run75 model
+
+sample76t_d1s5    : sample the run76t_d1s5 test set with the run76 model
+sample76t_d12s5    : sample the run76t_d12s5 test set with the run76 model
+sample76t_d1s7	   : sample the run76t_d1s7 test set with the run76 model
+sample76t_d4s5	   : sample the run76t_d4s5 test set with the run76 model
+sample76t_d10s5	   : sample the run76t_d10s5 test set with the run76 model
+sample76t_d10alts5	   : sample the run76t_d10alts5 test set with the run76 model
+
+sample77t_d1s5    : sample the run77t_d1s5 test set with the run77 model
+sample77t_d12s5    : sample the run77t_d12s5 test set with the run77 model
+sample77t_d1s7	   : sample the run77t_d1s7 test set with the run77 model
+sample77t_d4s5	   : sample the run77t_d4s5 test set with the run77 model
+sample77t_d10s5	   : sample the run77t_d10s5 test set with the run77 model
+sample77t_d10alts5	   : sample the run77t_d10alts5 test set with the run77 model
+
+
 # THESE WERE ALL NOT NEEDED...##
 run52bt_optuna : optuna for run52bt
 run56t_optuna :  optuna for run56t
@@ -294,3 +349,11 @@ mcmc41	     : mcmc for run41
 checkcov41   : cov check for run41
 mcmc54	     : mcmc for run54
 mcmc55	     : mcmc for run55
+mcmc65	     : mcmc for run65
+mcmc66	     : mcmc for run66
+
+mcmc_test65  : mcmc for the run65 test set
+
+mcmc65_set  : mcmc for the run65 test set 
+mcmc66_set  : mcmc for the run66 test set 
+mcmc66t_set : mcmc for the run65t test set 

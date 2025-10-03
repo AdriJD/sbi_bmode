@@ -24,7 +24,8 @@ opj = os.path.join
 comm = MPI.COMM_WORLD
 
 def simulate_for_sbi_mpi(simulator, proposal, param_names, num_sims, ndata, seed, comm,
-                         score_compress, mat_compress=None, also_return_mf_data=False):
+                         score_compress, mat_compress=None, also_return_mf_data=False,
+                         draw_from_fg_template=False):
     '''
     Draw parameters from proposal and simulate data.
 
@@ -49,7 +50,9 @@ def simulate_for_sbi_mpi(simulator, proposal, param_names, num_sims, ndata, seed
     mat_compress : (ntheta, ndata) array, optional
         Apply this compression matrix to the data vectors.
     also_return_mf_data : bool, optional
-       If set, additionally return the multi-frequency data vector.
+        If set, additionally return the multi-frequency data vector.
+    draw_from_fg_template : bool, optional
+        If set, draw foregrounds from provided templates.
 
     Returns
     -------
@@ -81,10 +84,10 @@ def simulate_for_sbi_mpi(simulator, proposal, param_names, num_sims, ndata, seed
         sims_mf = np.zeros((num_sims_per_rank[comm.rank], simulator.size_data_mf))
 
     gamma_dust_ell_array, gamma_sync_ell_array = None, None
-    if 'amp_beta_dust' in param_names:
+    if 'amp_beta_dust' in param_names and not draw_from_fg_template:
         gamma_dust_ell_array =  np.zeros(
             (num_sims_per_rank[comm.rank], simulator.lmax+1))
-    if 'amp_beta_sync' in param_names:
+    if 'amp_beta_sync' in param_names and not draw_from_fg_template:
         gamma_sync_ell_array =  np.zeros(
             (num_sims_per_rank[comm.rank], simulator.lmax+1))
     
@@ -107,7 +110,8 @@ def simulate_for_sbi_mpi(simulator, proposal, param_names, num_sims, ndata, seed
             amp_beta_sync=theta_dict.get('amp_beta_sync'),
             gamma_beta_sync=theta_dict.get('gamma_beta_sync'),
             rho_ds=theta_dict.get('rho_ds'),
-            also_return_mf_data=also_return_mf_data)
+            also_return_mf_data=also_return_mf_data,
+            draw_from_fg_template=draw_from_fg_template)
 
         draw = draw_data_dict['data']
         if also_return_mf_data:
@@ -213,7 +217,8 @@ def main(odir, config, specdir, seed, n_train, n_samples, n_rounds, pyilcdir, us
          data_std_file=None, previous_data_obs_file=None, previous_data_file=None,
          previous_params_file=None, num_hidden_features=50, num_transforms=5,
          num_blocks=2, clip_max_norm=5.0, training_batch_size=200, learning_rate=5e-4,
-         max_num_epochs=1000, stop_after_epochs=20, tsnpe=False):
+         max_num_epochs=1000, stop_after_epochs=20, tsnpe=False, mask_file=None,
+         fg_template_files=None):
     '''
     Run SBI.
 
@@ -331,6 +336,13 @@ def main(odir, config, specdir, seed, n_train, n_samples, n_rounds, pyilcdir, us
         Stop after validation loss has not improved after this many epochs.
     tsnpe : bool, optional
         If set, use truncated proposals for SNPE (TSNPE) method.
+    mask_file : str
+        Path to .fits file containing mask in HEALPix format.
+    fg_template_files : dict, optional
+        Dictionary such that d['dust']['f090'] returns a path to set of B-mode spherical
+        harmonic coefficients that represent a foreground template. Possible outer keys
+        are 'dust' and 'sync'. Inner keys have to match the band names in the config.
+        If provided, used for test set only.
     '''
 
     if previous_seed_file:
@@ -421,7 +433,8 @@ def main(odir, config, specdir, seed, n_train, n_samples, n_rounds, pyilcdir, us
         deproj_sync=deproj_sync, deproj_dbeta_sync=deproj_dbeta_sync, fiducial_beta=fiducial_beta,
         fiducial_T_dust=fiducial_T_dust, fiducial_beta_sync=fiducial_beta_sync, odir=odir,
         norm_params=norm_params, score_params=score_params,
-        coadd_equiv_crosses=coadd_equiv_crosses)
+        coadd_equiv_crosses=coadd_equiv_crosses, mask_file=mask_file,
+        fg_template_files=fg_template_files)
 
     proposal = prior
 
@@ -588,7 +601,8 @@ def main(odir, config, specdir, seed, n_train, n_samples, n_rounds, pyilcdir, us
         # We are using the prior as proposal for the test set.
         sim_dict = simulate_for_sbi_mpi(            
             cmb_simulator, prior, param_names, n_test, data_size,
-            rng_sims, comm, score_compress, mat_compress=mat_compress, also_return_mf_data=True)
+            rng_sims, comm, score_compress, mat_compress=mat_compress, also_return_mf_data=True,
+            draw_from_fg_template=fg_template_files is not None)
         if comm.rank == 0:
             theta_test = sim_dict['theta']
             x_test = sim_dict['sims']
@@ -688,6 +702,11 @@ if __name__ == '__main__':
                         help='Do not coadd comp1 x comp2 and comp2 x comp1 cross spectra in data vector')
     parser.add_argument('--no-highpass-filter', action='store_true',
                         help='Do not remove signal below lmin in simulated maps.')
+    parser.add_argument('--mask-file', type=str,
+                        help="Path to .fits file containing mask in HEALPix format.")
+    parser.add_argument('--fg-template-config', type=str,
+                        help="Path to .yaml config with [{dust,sync}][fstr] keys pointing to foreground \
+                        B-mode alms. If provided, used for test set only.")
 
     # Options for density estimation.
     parser.add_argument('--embed', action='store_true',
@@ -733,6 +752,8 @@ if __name__ == '__main__':
     args = parser.parse_args()
     
     odir = args.odir
+    fg_template_files = None
+    config = None
     if comm.rank == 0:
 
         print(f'Running with arguments: {args}')
@@ -741,10 +762,16 @@ if __name__ == '__main__':
         os.makedirs(odir, exist_ok=True)
         with open(args.config, 'r') as yfile:
             config = yaml.safe_load(yfile)
-    else:
-        config = None
+
+        if args.fg_template_config is not None:
+            with open(args.fg_template_config, 'r') as yfile:
+                fg_template_files = yaml.safe_load(yfile)
+                
     config = comm.bcast(config, root=0)
 
+    if args.fg_template_config is not None:
+        fg_template_files = comm.bcast(fg_template_files, root=0)
+    
     main(odir, config, args.specdir, args.seed, args.n_train,
          args.n_samples, args.n_rounds, args.pyilcdir, not args.no_dust_map, args.use_dbeta_map,
          args.deproj_dust, args.deproj_dbeta, args.fiducial_beta, args.fiducial_T_dust,
@@ -764,5 +791,5 @@ if __name__ == '__main__':
          num_blocks=args.num_blocks, clip_max_norm=args.clip_max_norm,
          training_batch_size=args.training_batch_size, learning_rate=args.learning_rate,
          max_num_epochs=args.max_num_epochs, stop_after_epochs=args.stop_after_epochs,
-         tsnpe=args.tsnpe)
+         tsnpe=args.tsnpe, mask_file=args.mask_file, fg_template_files=fg_template_files)
     

@@ -16,3 +16,6 @@ config21	like config18 but with very narrow prior for all but gamma parameters
 config22	like config18 but prior on A_d_BB centered on 28 and wider dust amps.
 config23	like config22 but without gamma for dust and sync
 config24	like config22 but with very narrow prior for all but gamma parameters
+config25	like config22 but with wider Ad, alpha_d, beta_d, A_s, alpha_s, beta_s priors
+config26	like 25 but larger standard deviation for Ad.
+config27	like 26 but with very narrow prior for r and A_lens

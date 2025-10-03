@@ -1,0 +1,72 @@
+data:
+  nside: 128
+  lmax: 200
+  lmin: 30
+  delta_ell: 15
+  nsplit: 2
+  freq_strings: ['wK', 'f030', 'f040', 'f090', 'f150', 'f230', 'f290', 'p353']
+  sensitivity_mode: "goal"
+  lknee_mode: "optimistic"
+  fsky: 0.1
+  cov_scalar_ell: "camb_lens_nobb.dat"
+  cov_tensor_ell: "camb_lens_r1.dat"
+  highpass_delta_ell: 5
+
+fixed_params:
+  freq_pivot_dust: 353.0e+9
+  temp_dust: 19.6
+  freq_pivot_sync: 23.0e+9  
+
+params:
+  r_tensor:
+    prior_type: "TruncatedNormal"
+    prior_params: [0.01, 0.00001, 0, 0.1]    
+    true_value: 0.01
+  A_lens:
+    prior_type: "TruncatedNormal"
+    prior_params: [0.5, 0.00001, 0, 10]
+    true_value: 0.5
+  A_d_BB:
+    prior_type: "TruncatedNormal"
+    prior_params: [28., 24., 12., 88.]
+    true_value: 29.
+  alpha_d_BB:
+    prior_type: "Normal"
+    prior_params: [-0.2, 0.6]
+    true_value: -0.3
+  beta_dust:
+    prior_type: "Normal"
+    prior_params: [1.59, 0.4]
+    true_value: 1.55
+  amp_beta_dust:
+    prior_type: "TruncatedNormal"
+    prior_params: [0.3, 0.5, 0, 1.59]
+    true_value: 0.4
+  gamma_beta_dust:
+    prior_type: "TruncatedNormal"
+    prior_params: [-4., 1., -6., -2]
+    true_value: -3.5
+  A_s_BB:
+    prior_type: "TruncatedNormal"
+    prior_params: [1, 3, 0, 20]
+    true_value: 1.5
+  alpha_s_BB:
+    prior_type: "Normal"
+    prior_params: [-0.7, 0.4]
+    true_value: -0.6
+  beta_sync:
+    prior_type: "Normal"
+    prior_params: [-3., 0.4]
+    true_value: -2.8
+  amp_beta_sync:
+    prior_type: "TruncatedNormal"
+    prior_params: [0.3, 0.5, 0, 0.5]
+    true_value: 0.3
+  gamma_beta_sync:
+    prior_type: "TruncatedNormal"
+    prior_params: [-4., 1., -6., -2]
+    true_value: -3.0
+  rho_ds:
+    prior_type: "Normal"
+    prior_params: [0, 0.2]
+    true_value: 0.1

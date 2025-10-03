@@ -1,0 +1,39 @@
+#!/bin/bash
+#SBATCH --job-name=mcmc65
+#SBATCH --nodes=1
+#SBATCH --ntasks-per-node=1
+#SBATCH --cpus-per-task=1
+#SBATCH --ntasks-per-core=1
+#SBATCH --time=01:00:00
+
+#SBATCH --mem=16GB
+
+export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
+
+module purge
+module load adri_gcc
+module load adri_base
+source $HOME/.pyenv/versions/sbi_bmode/bin/activate
+
+TAG=mcmc65
+ANADIR=${HOME}/local/cca_project/scripts
+ODIR=${HOME}/project/so/20240521_sbi_bmode/${TAG}
+IDIR=${HOME}/project/so/20240521_sbi_bmode/run65
+SPECDIR=${HOME}/local/cca_project/data
+CONFIGDIR=${HOME}/local/cca_project/scripts/configs
+PYILCDIR=${HOME}/local/pyilc
+
+CONFIG=${IDIR}/config.yaml
+DATA=${IDIR}/data_mf.npy
+
+export JAX_ENABLE_X64=True
+#export JAX_DEBUG_NANS=True
+export JAX_PLATFORMS=cpu 
+
+SEED=0
+
+srun -u --cpu-bind=cores -c $SLURM_CPUS_PER_TASK python ${ANADIR}/run_mcmc_basic.py --odir ${ODIR} --config ${CONFIG} --specdir ${SPECDIR} --data ${DATA} --seed ${SEED} --n_samples 2000 --n_chains 10
+#srun -u -n 1 python ${ANADIR}/run_mcmc_basic.py --odir ${ODIR} --config ${CONFIG} --specdir ${SPECDIR} --data ${DATA} --seed ${SEED} --n_samples 1000 --n_chains 1
+
+cp ./slurm-${SLURM_JOB_ID}.out ${ODIR}/
+

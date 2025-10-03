@@ -78,6 +78,12 @@ class CMBSimulator():
         Whether to use the mean of e.g. comp1 x comp2 and comp2 x comp1 spectra.
     apply_highpass_filter: bool, optional
         Filter out signal modes below lmin in the simulations.
+    mask_file : str
+        Path to .fits file containing mask in HEALPix format.
+    fg_template_files : dict, optional
+        Dictionary such that d['dust']['f090'] returns a path to set of B-mode spherical
+        harmonic coefficients that represent a foreground template. Possible outer keys
+        are 'dust' and 'sync'. Inner keys have to match the band names in the config.
     '''
 
     def __init__(self, specdir, data_dict, fixed_params_dict, pyilcdir=None,
@@ -86,7 +92,8 @@ class CMBSimulator():
                  deproj_dbeta=False, deproj_sync=False, deproj_dbeta_sync=False,
                  fiducial_beta=None, fiducial_T_dust=None, fiducial_beta_sync=None,
                  odir=None, norm_params=None, score_params=None,
-                 coadd_equiv_crosses=True, apply_highpass_filter=True):
+                 coadd_equiv_crosses=True, apply_highpass_filter=True, mask_file=None,
+                 fg_template_files=None):
 
         self.lmax = data_dict['lmax']
         self.lmin = data_dict['lmin']
@@ -128,6 +135,14 @@ class CMBSimulator():
         self.freqs = [self.get_freqs(fstr) for fstr in self.freq_strings]        
         assert np.all(np.asarray(self.freqs) > 1e9), 'Frequencies have to be in Ghz.'
         self.nfreq = len(self.freqs)
+
+        if fg_template_files is not None:
+            self.fg_templates = {}
+            for fstr in self.freq_strings:
+                self.fg_templates[fstr] = hp.read_alm(
+                    fg_template_files['dust'][fstr]).astype(np.complex128)
+                self.fg_templates[fstr] += hp.read_alm(
+                    fg_template_files['sync'][fstr]).astype(np.complex128)
         
         self.b_ells = self.get_gaussian_beams(self.beam_fwhms, self.lmax)
         if apply_highpass_filter:
@@ -224,6 +239,11 @@ class CMBSimulator():
             self.grad_logdens = grad(get_loglike, argnums=0)
             self.score_compress = lambda x: self.grad_logdens(score_params_arr, x)
 
+        if mask_file:
+            self.mask = hp.read_map(mask_file).astype(np.float64)
+        else:
+            self.mask = None
+            
     def get_noise_ps(self, fstr):
         '''
         Return the BB noise power spectrum for a given band.
@@ -383,7 +403,7 @@ class CMBSimulator():
                   seed, amp_beta_dust=None, gamma_beta_dust=None, A_s_BB=None,
                   alpha_s_BB=None, beta_sync=None,
                   amp_beta_sync=None, gamma_beta_sync=None, rho_ds=None,
-                  also_return_mf_data=False):
+                  also_return_mf_data=False, draw_from_fg_template=False):
         '''
         Draw data realization.
 
@@ -419,6 +439,8 @@ class CMBSimulator():
             Correlation coefficient between dust and synchroton amplitudes.
         also_return_mf_data : bool, optional
             If set, additionally return the multi-frequency data vector.
+        draw_from_fg_template : bool, optional
+            If set, draw foregrounds from provided templates.
 
         Returns
         -------
@@ -438,16 +460,27 @@ class CMBSimulator():
             seed = None
         seed = np.random.default_rng(seed=seed)
 
-        out_dict = gen_data(
-            A_d_BB, alpha_d_BB, beta_dust, self.freq_pivot_dust, self.temp_dust,
-            r_tensor, A_lens, self.freqs, seed, self.nsplit, self.noise_cov_ell,
-            self.cov_scalar_ell, self.cov_tensor_ell, self.b_ells, self.minfo, self.ainfo,
-            amp_beta_dust=amp_beta_dust, gamma_beta_dust=gamma_beta_dust,
-            A_s_BB=A_s_BB, alpha_s_BB=alpha_s_BB, beta_sync=beta_sync,
-            freq_pivot_sync=self.freq_pivot_sync, amp_beta_sync=amp_beta_sync,
-            gamma_beta_sync=gamma_beta_sync, rho_ds=rho_ds,
-            signal_filter=self.highpass_filter)
+        if draw_from_fg_template:
+            out_dict = gen_data_fg_template(
+                self.fg_templates, r_tensor, A_lens, self.freq_strings,
+                seed, self.nsplit, self.noise_cov_ell, self.cov_scalar_ell,
+                self.cov_tensor_ell, self.b_ells, self.minfo, self.ainfo,
+                signal_filter=self.highpass_filter, no_cmb_ee=(self.mask is not None))
+
+        else:
+            out_dict = gen_data(
+                A_d_BB, alpha_d_BB, beta_dust, self.freq_pivot_dust, self.temp_dust,
+                r_tensor, A_lens, self.freqs, seed, self.nsplit, self.noise_cov_ell,
+                self.cov_scalar_ell, self.cov_tensor_ell, self.b_ells, self.minfo, self.ainfo,
+                amp_beta_dust=amp_beta_dust, gamma_beta_dust=gamma_beta_dust,
+                A_s_BB=A_s_BB, alpha_s_BB=alpha_s_BB, beta_sync=beta_sync,
+                freq_pivot_sync=self.freq_pivot_sync, amp_beta_sync=amp_beta_sync,
+                gamma_beta_sync=gamma_beta_sync, rho_ds=rho_ds,
+                signal_filter=self.highpass_filter, no_cmb_ee=(self.mask is not None))
         omap = out_dict['data']
+
+        if self.mask is not None:
+            omap *= self.mask            
         
         # We always compute this even though not always needed, but cheap enough.
         spectra_mf = estimate_spectra(omap, self.minfo, self.ainfo)
@@ -462,7 +495,7 @@ class CMBSimulator():
                     sht.alm2map(tmp_alm[1], B_maps[split,f], self.ainfo, self.minfo, 0)
 
             B_maps *= 1e-6 # Convert to K because pyilc assumes that input is in K.
-
+            
             map_tmpdir = nilc_utils.write_maps(B_maps, output_dir=self.odir)
             nilc_maps = nilc_utils.get_nilc_maps(
                 self.pyilcdir, map_tmpdir, self.nsplit, self.nside, self.fiducial_beta,
@@ -496,11 +529,9 @@ class CMBSimulator():
         else:
             out = data_mf
                 
-        #return out
         out_dict['data'] = out
 
         if also_return_mf_data:
-            #out = (out, data_mf)
             out_dict['data_mf'] = data_mf
 
         return out_dict
@@ -659,13 +690,90 @@ def get_beta_map(minfo, ainfo, beta0, amp, gamma, seed, ell_0=1, ell_cutoff=1):
 
     return map_beta, beta_cl
 
+def gen_data_fg_template(fg_templates, r_tensor, A_lens, freq_strings, seed, nsplit,
+                         cov_noise_ell, cov_scalar_ell, cov_tensor_ell, b_ells,
+                         minfo, ainfo, signal_filter=None, no_cmb_ee=False):
+    '''
+    Generate test sets using foreground templates.
+
+    Parameters
+    ----------
+    fg_templates : dict
+        Dictionary with fstr keys containing foreground B-mode alms.
+    r_tensor : float
+        Tensor-to-scalar ratio.
+    A_lens : float
+        Amplitude of lensing contribution to BB.
+    freq_strings : array-like
+        Identifiers, e.g. f090, for the frequency channels of the instrument.
+    seed : numpy.random._generator.Generator object or int
+        Random number generator or seed for new random number generator.
+    nsplit : int
+        Number of splits of the data that have independent noise.
+    cov_noise_ell : (nfreq, npol, npol, nell) array
+        Noise covariance matrix.
+    cov_scalar_ell : (npol, nell) array
+        Signal covariance matrix with the EE and BB spectra from scalar perturbations.
+    cov_tensor_ell : (npol, nell) array
+        Signal covariance matrix with the EE and BB spectra from tensor perturbations.
+    b_ells : (nfreq, nell) array
+        Beam for each frequency.
+    minfo : optweight.map_utils.MapInfo object
+        Geometry of output map.
+    ainfo : pixell.curvedsky.alm_info object
+        Layout of spherical harmonic coefficients.
+    signal_filter : (nell) array. optional
+        Harmonic filter that is applied to the signal (similar to beam).
+    no_cmb_ee : bool, optional
+        If set, set EE cmb constribution to zero. Added for backwards compatibiliy.
+
+    Returns
+    -------
+    out_dict : dict
+        Output dictionary with following key-value pairs:
+            data : (nsplit, nfreq, npol, npix)
+                Simulated data.
+    '''
+
+    nfreq = len(freq_strings)
+    out = np.zeros((nsplit, nfreq, 2, minfo.npix))
+
+    # Spawn rng for noise.
+    seed = np.random.default_rng(seed)
+    rngs = seed.spawn(1 + nsplit)
+    rng_cmb = rngs[0]
+    rngs_noise = rngs[1:]
+
+    # Generate the CMB spectra.
+    cov_ell = spectra_utils.get_combined_cmb_spectrum(
+        r_tensor, A_lens, cov_scalar_ell, cov_tensor_ell)
+    lmax = cov_ell.shape[-1] - 1
+    assert ainfo.lmax == lmax
+            
+    cmb_alm = alm_utils.rand_alm(cov_ell, ainfo, rng_cmb, dtype=np.complex128)
+    if no_cmb_ee:
+        cmb_alm[0] = 0
+
+    for fidx, fstr in enumerate(freq_strings):
+        
+        b_ell = b_ells[fidx]
+        if signal_filter is not None:
+            b_ell = b_ell * signal_filter
+        out[:,fidx,:,:] = _gen_data_per_freq_fg_template(
+            fstr, cov_noise_ell[fidx], cmb_alm, nsplit, rngs_noise, ainfo, minfo, b_ell,
+            fg_templates)
+
+    out_dict = {'data' : out}    
+
+    return out_dict
+    
 def gen_data(A_d_BB, alpha_d_BB, beta_dust, freq_pivot_dust, temp_dust,
              r_tensor, A_lens, freqs, seed, nsplit, cov_noise_ell,
              cov_scalar_ell, cov_tensor_ell, b_ells, minfo, ainfo,
              amp_beta_dust=None, gamma_beta_dust=None, A_s_BB=None,
              alpha_s_BB=None, beta_sync=None, freq_pivot_sync=None,
              amp_beta_sync=None, gamma_beta_sync=None, rho_ds=None,
-             signal_filter=None):
+             signal_filter=None, no_cmb_ee=False):
     '''
     Generate simulated maps.
 
@@ -723,6 +831,8 @@ def gen_data(A_d_BB, alpha_d_BB, beta_dust, freq_pivot_dust, temp_dust,
         Correlation coefficient between dust and synchroton amplitudes.
     signal_filter : (nell) array. optional
         Harmonic filter that is applied to the signal (similar to beam).
+    no_cmb_ee : bool, optional
+        If set, set EE cmb constribution to zero. Added for backwards compatibiliy.
 
     Returns
     -------
@@ -772,6 +882,8 @@ def gen_data(A_d_BB, alpha_d_BB, beta_dust, freq_pivot_dust, temp_dust,
             cov_fg_ell[1,0] = cov_fg_ell[0,1]
         
     cmb_alm = alm_utils.rand_alm(cov_ell, ainfo, rng_cmb, dtype=np.complex128)
+    if no_cmb_ee:
+        cmb_alm[0] = 0
     fg_alm = alm_utils.rand_alm(cov_fg_ell, ainfo, rng_dust, dtype=np.complex128)    
 
     if A_s_BB is not None:
@@ -965,6 +1077,55 @@ def _gen_data_per_freq_gamma(freq, cov_noise_ell, beta_dust, temp_dust, freq_piv
     fg_alm = np.zeros(cmb_alm.shape, dtype=np.complex128)
     sht.map2alm(fg_map, fg_alm, minfo, ainfo, 2)
     signal_alm = cmb_alm + fg_alm
+    signal_alm = alm_c_utils.lmul(signal_alm, b_ell, ainfo, inplace=False)
+
+    for sidx in range(nsplit):
+
+        data_alm = signal_alm + alm_utils.rand_alm(
+            cov_noise_ell, ainfo, rngs_noise[sidx], dtype=np.complex128)
+        data_alm = np.asarray(data_alm, dtype=np.complex128)
+        sht.alm2map(data_alm, out[sidx], ainfo, minfo, 2)
+
+    return out
+
+def _gen_data_per_freq_fg_template(fstr, cov_noise_ell, cmb_alm, nsplit, rngs_noise,
+                                   ainfo, minfo, b_ell, fg_templates):
+    '''
+    Generate data for a given frequency, using foreground templates.
+
+    Parameters
+    ----------
+    fstr : float
+        Identifier of band, e.g. f090.
+    cov_noise_ell : (npol, npol, nell) array
+        Noise covariance matrix.
+    cmb_alm : (2, nelem) complex array
+        CMB E- and B-mode alms.
+    nsplit : int
+        Number of splits of the data that have independent noise.
+    rngs_noise : array-like of numpy.random._generator.Generator object
+        Random number generators for per-split noise.
+    ainfo : pixell.curvedsky.alm_info object
+        Layout of spherical harmonic coefficients.
+    minfo : optweight.map_utils.MapInfo object
+        Geometry of output map.
+    b_ell : (lmax + 1) array
+        Beam for this frequency.
+    fg_templates : dict
+        Dictionary with fstr keys containing foreground B-mode alms.
+
+    Returns
+    -------
+    out : (nsplit, 2, npix) array
+        Stokes Q and U maps for each split.
+    '''
+
+    out = np.zeros((nsplit, 2, minfo.npix))
+
+    signal_alm = cmb_alm.copy()
+    signal_alm[1] += fg_templates[fstr]
+
+    # Apply beam.
     signal_alm = alm_c_utils.lmul(signal_alm, b_ell, ainfo, inplace=False)
 
     for sidx in range(nsplit):

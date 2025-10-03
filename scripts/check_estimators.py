@@ -237,7 +237,7 @@ def main(path_params, path_data, path_data_obs, odir, imgdir, config, n_samples,
          num_atoms=10, training_batch_size=200, learning_rate=0.0005, clip_max_norm=5.0,
          hidden_features=50, num_transforms=3,
          embed=False, embed_num_layers=2, embed_num_out=25, embed_num_hiddens=25, density_estimator_type='maf',
-         num_blocks=2, dropout_probability=0., use_batch_norm=False, e_moped=False, cosmo_only=False):
+         num_blocks=2, dropout_probability=0., use_batch_norm=False, e_moped=False, cosmo_only=False, nsims=None):
     '''
     Run density estimation.
 
@@ -282,14 +282,25 @@ def main(path_params, path_data, path_data_obs, odir, imgdir, config, n_samples,
     e_moped : bool, optional
     cosmo_only : bool, optional
         If set, assume only `r` and `A_lens` have been estimated.
+    nsims : int, optional
+        Set (max) number of sims used for training.
     '''
 
-    theta = torch.as_tensor(np.load(path_params))
-
+    theta = np.load(path_params)
+    x = np.load(path_data)
+    
     if cosmo_only:
         theta = theta[:,:2]
+
+    if nsims is not None:
+        theta = theta[:nsims]
+        x = x[:nsims]
+
+    theta = torch.as_tensor(np.ascontiguousarray(theta))
+    x = torch.as_tensor(np.ascontiguousarray(x))
     
-    x = torch.as_tensor(np.load(path_data))
+    #theta = torch.as_tensor(np.load(path_params))    
+    #x = torch.as_tensor(np.load(path_data))
     x_obs = torch.as_tensor(np.load(path_data_obs))
 
     if e_moped:
@@ -368,7 +379,7 @@ def main(path_params, path_data, path_data_obs, odir, imgdir, config, n_samples,
     return best_validation_loss
 
 def run_optuna(trial, path_params, path_data, path_data_obs, odir_base, config, n_samples,
-               cosmo_only=False):
+               cosmo_only=False, nsims=None):
     '''
     Run one trial for the optimizer.
 
@@ -390,6 +401,8 @@ def run_optuna(trial, path_params, path_data, path_data_obs, odir_base, config, 
         Number of posterior draws.
     cosmo_only : bool, optional
         Create a posterior of only r and Alens.
+    nsims : int, optional
+        Set (max) number of sims used for training.
 
     Returns
     -------
@@ -441,7 +454,8 @@ def run_optuna(trial, path_params, path_data, path_data_obs, odir_base, config, 
                 dropout_probability=dropout_probability, use_batch_norm=use_batch_norm,
                 embed=embed,
                 embed_num_layers=embed_num_layers, embed_num_out=embed_num_out,
-                embed_num_hiddens=embed_num_hiddens, e_moped=e_moped, cosmo_only=cosmo_only)
+                embed_num_hiddens=embed_num_hiddens, e_moped=e_moped, cosmo_only=cosmo_only,
+                nsims=nsims)
 
     
     # Save trial parameters.
@@ -465,6 +479,7 @@ if __name__ == '__main__':
     parser.add_argument('--n_samples', type=int, default=50000, help="samples of posterior")
     parser.add_argument('--cosmo-only', action='store_true', help="Posterior of only r and Alens")
     parser.add_argument('--n-trials', type=int, default=144, help="Number of trials")
+    parser.add_argument('--nsims', type=int, help="Set (max) number of sims used for training")
 
     args = parser.parse_args()
 
@@ -483,7 +498,8 @@ if __name__ == '__main__':
         optuna.storages.journal.JournalFileBackend(args.journal))
 
     objective = lambda trial: run_optuna(trial, args.params, args.data, args.data_obs,
-                                         args.odir, config, args.n_samples, args.cosmo_only)
+                                         args.odir, config, args.n_samples, args.cosmo_only,
+                                         nsims=args.nsims)
     sampler = optuna.samplers.TPESampler(multivariate=True)
     study = optuna.create_study(study_name='test_study', storage=storage, direction="minimize", load_if_exists=True)
 
