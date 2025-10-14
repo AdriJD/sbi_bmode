@@ -156,6 +156,9 @@ run69t	test set with config24 (only varying gamma params) otherwise same as 69
 run70t	test set with config24 (only varying gamma params) otherwise same as 70
 run71t	test set with config24 (only varying gamma params) otherwise same as 71
 
+run65xtra extra test data for run65, used for e-moped compression in TARP test
+run56cov extra test data with fixed parameters rougly at PySM values.
+
 run75t_d1s5 test set for run75 with d1_s5 foreground template
 run75t_d12s5 test set for run75 with d12_s5 foreground template
 run75t_d1s7 test set for run75 with d1_s7 foreground template
@@ -293,6 +296,10 @@ sample69     : sample the run69 test set
 sample70     : sample the run70 test set
 sample71     : sample the run71 test set
 
+sample65_5000 : sample the run65 test set with run65_optuna_5000 posterior
+sample65_10000 : sample the run65 test set with run65_optuna_10000 posterior
+sample65_25000 : sample the run65 test set with run65_optuna_25000 posterior
+
 sample65_b   : sample the run65 test set with cosmo_only
 sample66_b   : sample the run66 test set with cosmo_only
 sample67_b   : sample the run67 test set with cosmo_only
@@ -351,9 +358,22 @@ mcmc54	     : mcmc for run54
 mcmc55	     : mcmc for run55
 mcmc65	     : mcmc for run65
 mcmc66	     : mcmc for run66
+mcmc66_rerun : rerun of mcmc66 after changes to sampling code
+mcmc66_rerun2 : rerun of mcmc66 after more changes to sampling code
 
 mcmc_test65  : mcmc for the run65 test set
 
-mcmc65_set  : mcmc for the run65 test set 
+mcmc65_set  : mcmc for the run65 test set
+mcmc65_set2  : rerun of mcmc65_set after changes to sampling code and config28
 mcmc66_set  : mcmc for the run66 test set 
-mcmc66t_set : mcmc for the run65t test set 
+
+mcmc65t_set : mcmc for the run65t test set.
+mcmc65t_set2 : rerun of mcmc65t_set after changes to sampling code and config28
+mcmc65t_set_debug : runing mcmc65t_set for a subset of the data
+
+tarp65 : tarp for the sample65 samples
+tarp65_5000 : tarp for the sample65_5000 samples
+tarp65_10000 : tarp for the sample65_10000 samples
+tarp65_25000 : tarp for the sample65_25000 samples
+
+tarp65_emoped : tarp for the sample65 samples with additional e-moped based refence points

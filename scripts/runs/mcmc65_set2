@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=mcmc65t_test
+#SBATCH --job-name=mcmc65_test2
 #SBATCH --nodes=6
 #SBATCH --ntasks-per-node=72
 #SBATCH --cpus-per-task=1
@@ -13,17 +13,15 @@ module load adri_gcc
 module load adri_base
 source $HOME/.pyenv/versions/sbi_bmode/bin/activate
 
-TAG=mcmc65t_test
+TAG=mcmc65_test2
 ANADIR=${HOME}/local/cca_project/scripts
 ODIR=${HOME}/project/so/20240521_sbi_bmode/${TAG}
-IDIR=${HOME}/project/so/20240521_sbi_bmode/run65t
+IDIR=${HOME}/project/so/20240521_sbi_bmode/run65
 SPECDIR=${HOME}/local/cca_project/data
 PYILCDIR=${HOME}/local/pyilc
 
-# Location of config. Needed for correct prior.
-CONFIGDIR=${HOME}/project/so/20240521_sbi_bmode/run65
-
-CONFIG=${CONFIGDIR}/config.yaml
+#CONFIG=${IDIR}/config.yaml
+CONFIG=${ANADIR}/configs/config28.yaml
 DATA=${IDIR}/data_draws_test_mf.npy
 PARAMS=${IDIR}/param_draws_test.npy
 

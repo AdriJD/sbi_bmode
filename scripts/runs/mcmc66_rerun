@@ -1,10 +1,10 @@
 #!/bin/bash
-#SBATCH --job-name=mcmc66_rerun
+#SBATCH --job-name=mcmc66
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=1
 #SBATCH --ntasks-per-core=1
-#SBATCH --time=00:55:00
+#SBATCH --time=01:00:00
 
 #SBATCH --mem=16GB
 

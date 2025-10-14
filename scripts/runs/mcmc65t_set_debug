@@ -1,0 +1,44 @@
+#!/bin/bash
+##SBATCH --job-name=mcmc65t_test_debug
+##SBATCH --nodes=1
+##SBATCH --ntasks-per-node=1
+##SBATCH --cpus-per-task=1
+##SBATCH --ntasks-per-core=1
+##SBATCH --time=00:45:00
+
+##SBATCH --mem=12GB
+
+#export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
+export OMP_NUM_THREADS=1
+
+module purge
+module load adri_gcc
+module load adri_base
+source $HOME/.pyenv/versions/sbi_bmode/bin/activate
+
+TAG=mcmc65t_test_debug
+ANADIR=${HOME}/local/cca_project/scripts
+ODIR=${HOME}/project/so/20240521_sbi_bmode/${TAG}
+IDIR=${HOME}/project/so/20240521_sbi_bmode/run65t
+SPECDIR=${HOME}/local/cca_project/data
+PYILCDIR=${HOME}/local/pyilc
+
+# Location of config. Needed for correct prior.
+#CONFIGDIR=${HOME}/project/so/20240521_sbi_bmode/run65
+
+#CONFIG=${CONFIGDIR}/config.yaml
+CONFIG=${ANADIR}/configs/config28.yaml
+DATA=${IDIR}/data_draws_test_mf.npy
+PARAMS=${IDIR}/param_draws_test.npy
+
+export JAX_ENABLE_X64=True
+#export JAX_DEBUG_NANS=True
+export JAX_PLATFORMS=cpu 
+
+SEED=0
+
+#srun -u --cpu-bind=cores -c $SLURM_CPUS_PER_TASK python ${ANADIR}/run_mcmc_basic.py --odir ${ODIR} --config ${CONFIG} --specdir ${SPECDIR} --data ${DATA} --seed ${SEED} --n_samples 4000 --n_chains 1 --params ${PARAMS} --data-index-slice 3
+srun -u -n 1 python ${ANADIR}/run_mcmc_basic.py --odir ${ODIR} --config ${CONFIG} --specdir ${SPECDIR} --data ${DATA} --seed ${SEED} --n_samples 4000 --n_chains 5 --params ${PARAMS} --data-index-slice 3
+
+#cp ./slurm-${SLURM_JOB_ID}.out ${ODIR}/
+

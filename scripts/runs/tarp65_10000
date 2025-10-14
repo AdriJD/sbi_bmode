@@ -1,0 +1,29 @@
+#!/bin/bash
+#SBATCH --job-name=tarp65_10000
+#SBATCH --nodes=1
+#SBATCH --ntasks-per-node=1
+#SBATCH --cpus-per-task=1
+#SBATCH --ntasks-per-core=1
+#SBATCH --time=00:10:00
+#SBATCH --mem=16GB
+
+export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
+
+module purge
+module load adri_gcc
+module load adri_base
+source $HOME/.pyenv/versions/sbi_bmode/bin/activate
+
+TAG=tarp65_10000
+ANADIR=${HOME}/local/cca_project/scripts
+ODIR=${HOME}/project/so/20240521_sbi_bmode/${TAG}
+
+TESTDIR=${HOME}/project/so/20240521_sbi_bmode/run65
+SAMPLEDIR=${HOME}/project/so/20240521_sbi_bmode/sample65_10000
+SAMPLES=${SAMPLEDIR}/samples_test.npy
+SEED=0
+TEST_PARAMS=${TESTDIR}/param_draws_test.npy
+
+srun -u --cpu-bind=cores -c $SLURM_CPUS_PER_TASK python ${ANADIR}/run_coverage_tarp_bootstrap.py --odir ${ODIR} --samples ${SAMPLES} --test-params ${TEST_PARAMS} --seed ${SEED}
+
+cp ./slurm-${SLURM_JOB_ID}.out ${ODIR}/

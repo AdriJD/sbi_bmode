@@ -68,7 +68,7 @@ def get_prior(params_dict):
     return prior_combined, param_names, transforms
 
 def main(odir, config, specdir, data_file, seed, n_samples, n_chains,
-         coadd_equiv_crosses=True, param_file=None):
+         coadd_equiv_crosses=True, param_file=None, data_index_slice=None):
     '''
     Run mcmc script.
 
@@ -95,6 +95,9 @@ def main(odir, config, specdir, data_file, seed, n_samples, n_chains,
     param_file : str, optional
         Path to .npy file containing true parameters. Can be one set or mutliple
         (same number as data_file). If not provided, uses true parameters from config.
+    data_index_slice : slice, optional
+        Slice into the indices of the input data set. Only used when `data_file`
+        refers to a set of spectra.
     '''
     
     data_dict, fixed_params_dict, params_dict = script_utils.parse_config(config)
@@ -115,18 +118,32 @@ def main(odir, config, specdir, data_file, seed, n_samples, n_chains,
                                            coadd_equiv_crosses=coadd_equiv_crosses)
     
     # Load data.
-    data_arr = jnp.asarray(np.load(data_file))
+    if data_index_slice is None:
+        data_index_slice = slice(None, None, None)
+    data_arr = np.load(data_file)
 
     if data_arr.ndim == 1:
+        data_arr = data_arr[np.newaxis,:]    
+    data_arr = data_arr[data_index_slice]
+    if data_arr.ndim == 1:
         data_arr = data_arr[np.newaxis,:]
+    
+    data_arr = jnp.asarray(data_arr)
+        
     num_sims = data_arr.shape[0]
     
     # Use the true parameters for the fiducial spectrum needed for the covariance matrix.    
     if param_file is not None:
-        params = jnp.asarray(np.load(param_file))
+        params = np.load(param_file)
 
         if params.ndim == 1:
             params[np.newaxis,:]
+        params = params[data_index_slice]
+        if params.ndim == 1:
+            params[np.newaxis,:]
+
+        params = jnp.asarray(params)
+            
         assert params.shape[0] == num_sims
 
         # Turn this into a list of dicts. We can use param_names_full because those
@@ -220,7 +237,7 @@ def main(odir, config, specdir, data_file, seed, n_samples, n_chains,
 
             '''
 
-            # Loop over parameters, transform each of them and compute log oab jacobian for each.
+            # Loop over parameters, transform each of them and compute log abs Jacobian for each.
             params = {k: transforms[k].inv_func(v) for k, v in params.items()}
 
             clipped_abs_jac = lambda transform, y : jnp.clip(
@@ -233,10 +250,16 @@ def main(odir, config, specdir, data_file, seed, n_samples, n_chains,
 
             logprob = _logprob(params)
 
-            return logprob 
+            return logprob + sum_log_abs_jac
 
         def get_prior_draw_transformed(rng_key):
             '''
+
+            Parameters
+            ----------
+            rng_key : 
+                RNG key.
+            
             Returns
             -------
             draw : dict
@@ -313,9 +336,7 @@ def main(odir, config, specdir, data_file, seed, n_samples, n_chains,
         transformed = jax.vmap(jax.vmap(transform_fn))(mcmc_samples)
 
         # Save samples in numpy array similar to run_sbi_basic output.
-        #samples = np.zeros((n_chains, n_samples, len(param_names)))        
         for pidx, pname in enumerate(param_names):
-            #samples[:,:,pidx] = transformed[pname]
             chains_on_rank[idx,:,:,pidx] = transformed[pname].astype(np.float32)
 
     samples = script_utils.gatherv_array(chains_on_rank, comm)
@@ -340,6 +361,8 @@ if __name__ == '__main__':
     parser.add_argument('--n_chains', type=int, default=1, help="number of independent chains.")
     parser.add_argument('--no-coadd-equiv-crosses', action='store_true',
                         help='Do not coadd comp1 x comp2 and comp2 x comp1 cross spectra in data vector')
+    parser.add_argument('--data-index-slice', type=str, default=':',
+                        help='Slice into data and params, e.g. "5" or ":10:2"')
 
     args = parser.parse_args()
 
@@ -348,4 +371,5 @@ if __name__ == '__main__':
         config = yaml.safe_load(yfile)
 
     main(args.odir, config, args.specdir, args.data, args.seed, args.n_samples, args.n_chains,
-         coadd_equiv_crosses=not args.no_coadd_equiv_crosses, param_file=args.params)
+         coadd_equiv_crosses=not args.no_coadd_equiv_crosses, param_file=args.params,
+         data_index_slice=script_utils.str_to_slice(args.data_index_slice))

@@ -225,3 +225,32 @@ def preprocess_n_train(n_train, n_rounds):
 
     return n_train
     
+def str_to_slice(string):
+    '''
+    Convert a string to a 1D slice, e.g. ':10' into slice(None,10,None).
+
+    Parameters
+    ----------
+    string : str
+        Input string.
+
+    Returns
+    -------
+    sel : slice
+        Output slice.
+    '''
+    
+    string = string.strip()
+    
+    if string.isdigit() or (string.startswith('-') and string[1:].isdigit()):        
+        # Simple integer case.
+        return [int(string)]
+    
+    elif ':' in string:
+        # Slice case.
+        parts = [p.strip() or None for p in string.split(':')]
+        parts = [int(p) if p is not None else None for p in parts]
+        return slice(*parts)
+    
+    else:
+        raise ValueError(f"Invalid slice string: '{s}'")

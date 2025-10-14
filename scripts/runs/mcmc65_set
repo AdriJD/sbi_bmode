@@ -18,7 +18,6 @@ ANADIR=${HOME}/local/cca_project/scripts
 ODIR=${HOME}/project/so/20240521_sbi_bmode/${TAG}
 IDIR=${HOME}/project/so/20240521_sbi_bmode/run65
 SPECDIR=${HOME}/local/cca_project/data
-CONFIGDIR=${HOME}/local/cca_project/scripts/configs
 PYILCDIR=${HOME}/local/pyilc
 
 CONFIG=${IDIR}/config.yaml
