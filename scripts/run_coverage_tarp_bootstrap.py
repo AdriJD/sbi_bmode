@@ -1,4 +1,4 @@
-10import os
+import os
 import argparse
 
 import numpy as np
@@ -8,7 +8,7 @@ from sbi_bmode import compress_utils
 opj = os.path.join
 
 def main(odir, samples_file, true_params_file, data_file=None, emoped_data_file=None,
-         emoped_params_file=None, seed=None):
+         emoped_params_file=None, seed=None, cosmo_only=False, noise_frac=0.1):
     '''
     Run TARP coverage tests.
 
@@ -28,6 +28,11 @@ def main(odir, samples_file, true_params_file, data_file=None, emoped_data_file=
         Path to .npy file with parameters for e-moped compression (nsim', nparam).
     seed : int, optional
         Integer for numpy random.seed.
+    cosmo_only : bool, optional
+        If set, only consider r and Alens.
+    noise_frac : float, optional
+        Standard deviation (expressed as fraction of span of parameters) added to reference points
+        when `emoped_data` is provided.
     '''
 
     # Needed because otherwise the TARP resampling all uses the same seed......
@@ -36,6 +41,10 @@ def main(odir, samples_file, true_params_file, data_file=None, emoped_data_file=
     samples = np.load(samples_file)
     true_params = np.load(true_params_file)
 
+    if cosmo_only:
+        samples = samples[:,:,:2]
+        true_params = true_params[:,:2]
+    
     assert samples.ndim == 3
     samples = samples.transpose(1, 0, 2)
 
@@ -79,7 +88,9 @@ def main(odir, samples_file, true_params_file, data_file=None, emoped_data_file=
         data = np.load(data_file)        
         emoped_data = np.load(emoped_data_file)
         emoped_params = np.load(emoped_params_file)        
-
+        if cosmo_only:
+            emoped_params = emoped_params[:,:2]
+        
         compress_mat = compress_utils.get_e_moped_matrix(emoped_data, emoped_params)
 
         data_compressed = np.einsum('ij, aj -> ai', compress_mat, data)
@@ -95,9 +106,8 @@ def main(odir, samples_file, true_params_file, data_file=None, emoped_data_file=
         # Rescale to parameter hypercube.
         data_compressed =  (max_params - min_params) * (data_compressed + min_params)
 
-        # Add 10% noise.
-        #noise = np.random.randn(num_sims, num_params) * 0.1 * (max_params - min_params)
-        noise = np.random.randn(num_sims, num_params) * 1. * (max_params - min_params)        
+        # Add noise.
+        noise = np.random.randn(num_sims, num_params) * noise_frac * (max_params - min_params)        
         data_compressed += noise
 
         # Clip to parameter range.
@@ -126,10 +136,15 @@ if __name__ == '__main__':
     parser.add_argument('--emoped-data', help='Path to .npy file with test set data for emoped')
     parser.add_argument('--emoped-params', help='Path to .npy file with test set aparameters for emoped')
     parser.add_argument('--seed', default=0, type=int, help='RNG seed')
+    parser.add_argument('--cosmo-only', action='store_true', help='Only consider r and A_lens parameters.')
+    parser.add_argument('--noise-frac', default=0.1, type=float,
+                        help='Standard deviation of noise added to data-dependent reference distribution '\
+                        '(only if emoped-data given) expressed as fraction of width of span parameters.')
 
     args = parser.parse_args()
     
     os.makedirs(args.odir, exist_ok=True)
 
     main(args.odir, args.samples, args.test_params, data_file=args.test_data,
-         emoped_data_file=args.emoped_data, emoped_params_file=args.emoped_params, seed=args.seed)
+         emoped_data_file=args.emoped_data, emoped_params_file=args.emoped_params, seed=args.seed,
+         cosmo_only=args.cosmo_only, noise_frac=args.noise_frac)

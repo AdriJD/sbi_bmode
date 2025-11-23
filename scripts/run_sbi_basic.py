@@ -218,7 +218,7 @@ def main(odir, config, specdir, seed, n_train, n_samples, n_rounds, pyilcdir, us
          previous_params_file=None, num_hidden_features=50, num_transforms=5,
          num_blocks=2, clip_max_norm=5.0, training_batch_size=200, learning_rate=5e-4,
          max_num_epochs=1000, stop_after_epochs=20, tsnpe=False, mask_file=None,
-         fg_template_files=None):
+         fg_template_files=None, test_proposal_file=None, test_data_obs_file=None):
     '''
     Run SBI.
 
@@ -343,6 +343,11 @@ def main(odir, config, specdir, seed, n_train, n_samples, n_rounds, pyilcdir, us
         harmonic coefficients that represent a foreground template. Possible outer keys
         are 'dust' and 'sync'. Inner keys have to match the band names in the config.
         If provided, used for test set only.
+    test_proposal_file : str, optional 
+        Normalizing flow .pkl file used to draw test data (for posterior predictive checks.
+    test_data_obs_file : str, optional
+        Observed data .npy file used to to condition `test_proposal` on. Can include slice,
+        e.g. "test.npy[2:5]" to only load a part of the array.
     '''
 
     if previous_seed_file:
@@ -358,7 +363,7 @@ def main(odir, config, specdir, seed, n_train, n_samples, n_rounds, pyilcdir, us
         else:
             data_mean, data_std = None, None
         data_mean = comm.bcast(data_mean, root=0)
-        data_std = comm.bcast(data_std, root=0)        
+        data_std = comm.bcast(data_std, root=0)
 
     if previous_data_obs_file:
         if comm.rank == 0:
@@ -380,6 +385,15 @@ def main(odir, config, specdir, seed, n_train, n_samples, n_rounds, pyilcdir, us
     if score_compress and e_moped:
         raise ValueError("Cannot have both score and e-MOPED compression.")
 
+    test_proposal = None 
+    if test_proposal_file is not None:
+        if comm.rank == 0:
+            test_proposal = np.load(test_proposal_file, allow_pickle=True)
+            test_data_obs = script_utils.load_npy_sliced(
+                *script_utils.extract_slice(test_data_obs_file))
+            test_proposal.set_default_x(torch.as_tensor(test_data_obs))
+        test_proposal = comm.bcast(test_proposal, root=0)
+                
     n_train_per_round = script_utils.preprocess_n_train(n_train, n_rounds) # Now always a list.
     
     # Seed SBI. Annoyingly, this is using a bunch of global seeds. Every rank
@@ -598,11 +612,11 @@ def main(odir, config, specdir, seed, n_train, n_samples, n_rounds, pyilcdir, us
             proposal = RestrictedPrior(prior, accept_reject_fn, sample_with="rejection")
                 
     if n_test is not None:
-        # We are using the prior as proposal for the test set.
+        # We are using the prior as proposal for the test set, unless test_proposal is given.
         sim_dict = simulate_for_sbi_mpi(            
-            cmb_simulator, prior, param_names, n_test, data_size,
-            rng_sims, comm, score_compress, mat_compress=mat_compress, also_return_mf_data=True,
-            draw_from_fg_template=fg_template_files is not None)
+            cmb_simulator, test_proposal if test_proposal is not None else prior, param_names,
+            n_test, data_size, rng_sims, comm, score_compress, mat_compress=mat_compress,
+            also_return_mf_data=True, draw_from_fg_template=fg_template_files is not None)
         if comm.rank == 0:
             theta_test = sim_dict['theta']
             x_test = sim_dict['sims']
@@ -707,7 +721,11 @@ if __name__ == '__main__':
     parser.add_argument('--fg-template-config', type=str,
                         help="Path to .yaml config with [{dust,sync}][fstr] keys pointing to foreground \
                         B-mode alms. If provided, used for test set only.")
-
+    parser.add_argument('--test-proposal', type=str,
+                        help='Normalizing flow .pkl file used to draw test data (for posterior predictive checks)')
+    parser.add_argument('--test-data-obs', type=str,
+                        help='Observed data .npy file used to to condition `test-proposal` on.')
+        
     # Options for density estimation.
     parser.add_argument('--embed', action='store_true',
                         help="Estimate and apply embedding (compression) network")    
@@ -791,5 +809,6 @@ if __name__ == '__main__':
          num_blocks=args.num_blocks, clip_max_norm=args.clip_max_norm,
          training_batch_size=args.training_batch_size, learning_rate=args.learning_rate,
          max_num_epochs=args.max_num_epochs, stop_after_epochs=args.stop_after_epochs,
-         tsnpe=args.tsnpe, mask_file=args.mask_file, fg_template_files=fg_template_files)
+         tsnpe=args.tsnpe, mask_file=args.mask_file, fg_template_files=fg_template_files,
+         test_proposal_file=args.test_proposal, test_data_obs_file=args.test_data_obs)
     

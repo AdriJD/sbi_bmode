@@ -28,7 +28,7 @@ params:
     true_value: 0.5
   A_d_BB:
     prior_type: "TruncatedNormal"
-    prior_params: [50., 0.1, 12., 44.]
+    prior_params: [50., 0.1, 12., 88.]
     true_value: 50.
   alpha_d_BB:
     prior_type: "Normal"
@@ -45,7 +45,7 @@ params:
   gamma_beta_dust:
     prior_type: "TruncatedNormal"
     prior_params: [-4., 0.01, -6., -2]
-    true_value: -4
+    true_value: -4.
   A_s_BB:
     prior_type: "TruncatedNormal"
     prior_params: [4., 0.01, 0, 20]

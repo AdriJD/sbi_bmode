@@ -1,0 +1,47 @@
+#!/bin/bash
+#SBATCH --job-name=run79t_d12s5
+#SBATCH --nodes=6
+#SBATCH --ntasks-per-node=72
+#SBATCH --cpus-per-task=1
+#SBATCH --ntasks-per-core=1
+#SBATCH --time=1:00:00
+
+export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
+
+module purge
+module load adri_gcc
+module load adri_base
+source $HOME/.pyenv/versions/sbi_bmode/bin/activate
+
+TAG=run79t_d12s5
+ANADIR=${HOME}/local/cca_project/scripts
+ODIR=${HOME}/project/so/20240521_sbi_bmode/${TAG}
+ODIR_PREV=${HOME}/project/so/20240521_sbi_bmode/run77
+SPECDIR=${HOME}/local/cca_project/data
+CONFIGDIR=${HOME}/local/cca_project/scripts/configs
+PYILCDIR=${HOME}/local/pyilc
+PYSMDIR=${HOME}/project/so/20240521_sbi_bmode/pysm
+MASKFILE=${PYSMDIR}/masks/mask.fits
+FG_CONFIG=${PYSMDIR}/configs/pysm_d12_s5.yaml
+
+CONFIG=${CONFIGDIR}/config26.yaml
+
+DATA_MEAN=${ODIR_PREV}/data_mean.npy
+DATA_STD=${ODIR_PREV}/data_std.npy
+
+export JAX_ENABLE_X64=True
+export JAX_DEBUG_NANS=True
+export JAX_PLATFORMS=cpu 
+
+WAVELET_TYPE="TopHatHarmonic"
+NROUNDS=0
+NTRAIN_PER_ROUND=10368
+FID_BETA=1.5
+FID_T=19.6
+FID_BETA_SYNC=-3.0
+NTEST=864
+SEED=0
+
+srun -u --cpu-bind=cores -c $SLURM_CPUS_PER_TASK python ${ANADIR}/run_sbi_basic.py --odir ${ODIR} --config ${CONFIG} --specdir ${SPECDIR} --n_train ${NTRAIN_PER_ROUND} --n_samples 50000 --n_rounds ${NROUNDS} --pyilcdir ${PYILCDIR} --fiducial_beta ${FID_BETA} --fiducial_T_dust ${FID_T} --fiducial_beta_sync ${FID_BETA_SYNC} --deproj_dust --deproj_dbeta --deproj_sync --deproj_dbeta_sync --use_dbeta_map --use_sync_map --use_dbeta_sync_map --seed ${SEED} --n_test ${NTEST} --mask-file ${MASKFILE} --data-mean ${DATA_MEAN} --data-std ${DATA_STD} --fg-template-config ${FG_CONFIG} --wavelet-type ${WAVELET_TYPE}
+
+cp ./slurm-${SLURM_JOB_ID}.out ${ODIR}/

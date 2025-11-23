@@ -1,0 +1,34 @@
+#!/bin/bash
+#SBATCH --job-name=tarp79t_pysm_nilc
+#SBATCH --nodes=1
+#SBATCH --ntasks-per-node=1
+#SBATCH --cpus-per-task=1
+#SBATCH --ntasks-per-core=1
+#SBATCH --time=00:10:00
+#SBATCH --mem=4GB
+
+#SBATCH --array=0-5
+
+PYSM_COMBS=(d1s5 d12s5 d1s7 d4s5 d10s5 d10alts5)
+
+PYSM_COMB=${PYSM_COMBS[$SLURM_ARRAY_TASK_ID]}
+
+export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
+
+module purge
+module load adri_gcc
+module load adri_base
+source $HOME/.pyenv/versions/sbi_bmode/bin/activate
+
+ANADIR=${HOME}/local/cca_project/scripts
+ODIR=${HOME}/project/so/20240521_sbi_bmode/tarp79t_${PYSM_COMB}
+
+TESTDIR=${HOME}/project/so/20240521_sbi_bmode/run79t_${PYSM_COMB}
+SAMPLEDIR=${HOME}/project/so/20240521_sbi_bmode/sample79t_${PYSM_COMB}
+SAMPLES=${SAMPLEDIR}/samples_test.npy
+SEED=0
+TEST_PARAMS=${TESTDIR}/param_draws_test.npy
+
+srun -u --cpu-bind=cores -c $SLURM_CPUS_PER_TASK python ${ANADIR}/run_coverage_tarp_bootstrap.py --odir ${ODIR} --samples ${SAMPLES} --test-params ${TEST_PARAMS} --seed ${SEED} --cosmo-only
+
+cp ./slurm-${SLURM_JOB_ID}.out ${ODIR}/

@@ -157,7 +157,13 @@ run70t	test set with config24 (only varying gamma params) otherwise same as 70
 run71t	test set with config24 (only varying gamma params) otherwise same as 71
 
 run65xtra extra test data for run65, used for e-moped compression in TARP test
-run56cov extra test data with fixed parameters rougly at PySM values.
+run65cov extra test data with fixed parameters rougly at PySM values.
+run65post_d1s5 extra test data drawn from run65-derived posterior for posterior predictive checks.
+run65post_d12s5 extra test data drawn from run65-derived posterior for posterior predictive checks.
+run65post_d1s7 extra test data drawn from run65-derived posterior for posterior predictive checks.
+run65post_d4s5 extra test data drawn from run65-derived posterior for posterior predictive checks.
+run65post_d10s5 extra test data drawn from run65-derived posterior for posterior predictive checks.
+run65post_d10alts5 extra test data drawn from run65-derived posterior for posterior predictive checks.
 
 run75t_d1s5 test set for run75 with d1_s5 foreground template
 run75t_d12s5 test set for run75 with d12_s5 foreground template
@@ -178,6 +184,20 @@ run77t_d1s7 like above but with d1_s7
 run77t_d4s5 like above but with d4_s5
 run77t_d10s5 like above but with d10_s5
 run77t_d10alts5 like above but with d10alt_s5
+
+run78t_d1s5 test set for run76 with d1_s5 foreground template with config26 (prior draws for r and Alens)
+run78t_d12s5 like above but with d12_s5
+run78t_d1s7 like above but with d1_s7
+run78t_d4s5 like above but with d4_s5
+run78t_d10s5 like above but with d10_s5
+run78t_d10alts5 like above but with d10alt_s5
+
+run79t_d1s5 test set for run77 with d1_s5 foreground template with config26 (prior draws for r and Alens)
+run79t_d12s5 like above but with d12_s5
+run79t_d1s7 like above but with d1_s7
+run79t_d4s5 like above but with d4_s5
+run79t_d10s5 like above but with d10_s5
+run79t_d10alts5 like above but with d10alt_s5
 
 mcmc33  
 
@@ -342,6 +362,20 @@ sample77t_d4s5	   : sample the run77t_d4s5 test set with the run77 model
 sample77t_d10s5	   : sample the run77t_d10s5 test set with the run77 model
 sample77t_d10alts5	   : sample the run77t_d10alts5 test set with the run77 model
 
+sample78t_d1s5    : sample the run78t_d1s5 test set with the run76 model
+sample78t_d12s5    : sample the run78t_d12s5 test set with the run76 model
+sample78t_d1s7	   : sample the run78t_d1s7 test set with the run76 model
+sample78t_d4s5	   : sample the run78t_d4s5 test set with the run76 model
+sample78t_d10s5	   : sample the run78t_d10s5 test set with the run76 model
+sample78t_d10alts5	   : sample the run78t_d10alts5 test set with the run76 model
+
+sample79t_d1s5    : sample the run79t_d1s5 test set with the run77 model
+sample79t_d12s5    : sample the run79t_d12s5 test set with the run77 model
+sample79t_d1s7	   : sample the run79t_d1s7 test set with the run77 model
+sample79t_d4s5	   : sample the run79t_d4s5 test set with the run77 model
+sample79t_d10s5	   : sample the run79t_d10s5 test set with the run77 model
+sample79t_d10alts5	   : sample the run79t_d10alts5 test set with the run77 model
+
 
 # THESE WERE ALL NOT NEEDED...##
 run52bt_optuna : optuna for run52bt
@@ -377,3 +411,6 @@ tarp65_10000 : tarp for the sample65_10000 samples
 tarp65_25000 : tarp for the sample65_25000 samples
 
 tarp65_emoped : tarp for the sample65 samples with additional e-moped based refence points
+
+tarp78t_pysm : tarp for the sample78t samples (NILC) job array
+tarp79t_pysm : tarp for the sample78t samples (HILC) job array

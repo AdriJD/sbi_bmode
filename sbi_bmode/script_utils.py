@@ -254,3 +254,49 @@ def str_to_slice(string):
     
     else:
         raise ValueError(f"Invalid slice string: '{s}'")
+
+def load_npy_sliced(ifile, sel=slice(None)):
+    '''
+    Load a slice of a .npy numpy array
+
+    Parameters
+    ----------
+    ifile : str, file-like object
+        Input file or path to input file.
+    sel : slice, tuple or slices, integer arrays
+        Slice into the array on disk.
+
+    Returns
+    -------
+    out : array
+        Array loaded from disk.
+    '''
+
+    return np.load(ifile, mmap_mode='r')[sel].copy()
+
+def extract_slice(ifile):
+    '''
+    Split a filename like "file.npy[:3]" up into the actual path and a slice.
+
+    Parameters
+    ----------
+    ifile : str
+        Path to filename, can include e.g. [:30] at end of filename.
+
+    Returns
+    -------
+    filename : str
+        Filename without slice.
+    sel : slice
+        Slice.
+    '''
+
+    if '[' in ifile and ifile.endswith(']'):
+        filename, sel = ifile.split('[', 1)
+        sel = str_to_slice(sel[:-1])  # Remove trailing ']'
+    else:
+        filename, sel = ifile, slice(None)
+
+    return filename, sel
+
+    
