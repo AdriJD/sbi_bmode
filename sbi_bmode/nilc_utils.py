@@ -148,7 +148,7 @@ def get_nilc_maps(pyilc_path, map_tmpdir, nsplit, nside, fiducial_beta, fiducial
         pyilc_input_params['freq_map_files'] = \
             [f'{map_tmpdir}/map_split{split}_freq{f}.fits' for f in range(pyilc_input_params['N_freqs'])] 
         pyilc_input_params['save_as'] = 'fits'
-
+        
         # NOTE, I should keep track of these failures. They should never reach 0.9, but values of
         # 1e-2 seem to be hard to avoid when deprojecting four sky components.
         pyilc_input_params['resp_tol'] = 10 # i.e. disable.
@@ -156,7 +156,9 @@ def get_nilc_maps(pyilc_path, map_tmpdir, nsplit, nside, fiducial_beta, fiducial
 
         # Foreground parameters.
         nu0_radio_ghz = float(freq_pivot_sync) * 1e-9 if freq_pivot_sync is not None else 22.0
-        beta_radio = float(fiducial_beta_sync) if fiducial_beta_sync is not None else -3.0
+        # Note, the +2 is needed because pyilc describes sync as T[K_CMB] = nu^beta b'nu, while
+        # the simulations (and pysm) use T[K_CMB] = nu^beta (e^x - 1)^2 / (x^2e^x).
+        beta_radio = float(fiducial_beta_sync + 2) if fiducial_beta_sync is not None else -1.0
         pars = {'beta_CIB': float(fiducial_beta),
                 'Tdust_CIB': float(fiducial_T_dust),
                 'nu0_CIB_ghz': float(freq_pivot_dust) * 1e-9,
@@ -278,7 +280,8 @@ def get_nilc_maps(pyilc_path, map_tmpdir, nsplit, nside, fiducial_beta, fiducial
         for c, comp in enumerate(comps):
             subprocess.run([f"python {pyilc_path}/pyilc/main.py {all_yaml_files[c]}"],
                            shell=True, env=env, stdout=stdout, stderr=subprocess.STDOUT)
-        stdout.close()
+        if stdout is not None:
+            stdout.close()
             
         # Load NILC maps, then remove nilc tmpdir.
         cmb_nilc = hp.read_map(f'{nilc_tmpdir}/{cmb_oname}.fits')

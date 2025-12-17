@@ -1,0 +1,40 @@
+#!/bin/bash
+#SBATCH --job-name=sample87t
+#SBATCH --nodes=1
+#SBATCH --ntasks-per-node=72
+#SBATCH --cpus-per-task=1
+#SBATCH --ntasks-per-core=1
+#SBATCH --time=00:20:00
+
+export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
+
+module purge
+module load adri_gcc
+module load adri_base
+source $HOME/.pyenv/versions/sbi_bmode/bin/activate
+
+TAG=sample87t
+ANADIR=${HOME}/local/cca_project/scripts
+ODIR=${HOME}/project/so/20240521_sbi_bmode/${TAG}
+
+# Location of posterior.
+IDIR_OPTUNA=${HOME}/project/so/20240521_sbi_bmode/run87_optuna/trial_0124
+# Location of config.
+RUNDIR=${HOME}/project/so/20240521_sbi_bmode/run87
+# Location of test sets.
+TESTDIR=${HOME}/project/so/20240521_sbi_bmode/run87t
+
+CONFIG=${RUNDIR}/config.yaml
+POSTERIOR=${IDIR_OPTUNA}/posterior.pkl
+SEED=0
+TEST_DATA=${TESTDIR}/data_draws_test.npy
+TEST_PARAMS=${TESTDIR}/param_draws_test.npy
+NSAMP=10000
+
+export JAX_ENABLE_X64=True
+export JAX_DEBUG_NANS=True
+export JAX_PLATFORMS=cpu 
+
+srun -u --cpu-bind=cores -c $SLURM_CPUS_PER_TASK python ${ANADIR}/sample_test_set.py --odir ${ODIR} --config ${CONFIG} --posterior ${POSTERIOR} --test-params ${TEST_PARAMS} --test-data ${TEST_DATA} --nsamp ${NSAMP} --seed ${SEED}
+
+cp ./slurm-${SLURM_JOB_ID}.out ${ODIR}/

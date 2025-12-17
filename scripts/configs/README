@@ -21,3 +21,6 @@ config26	like 25 but larger standard deviation for Ad.
 config27	like 26 but with very narrow prior for r and A_lens
 config28	like 22 but widening truncation for Ad
 config29	fixed parameters at roughly the PySM values.
+
+config30	Similar to 22 but with 2x prior width on r and the wider fg params from config26
+config31	No gamma version of config30

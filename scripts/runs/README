@@ -126,6 +126,7 @@ run63	TSNPE 1000 * 10, config18
 run64	TSNPE 1000 * 10, config18 for HILC
 
 run65	NILC cmb + d + s + dbd + dbs config22, 51840 sims
+run65_rerun	rerun of run65 (note the different convention of beta_sync)
 run66	like 65 but config23, so no gamma, 51840 sims
 run67	NILC only, config22, 51840 sims
 run68	NILC cmb + d + s, config22, 51840 sims
@@ -141,6 +142,27 @@ run75	NILC cmb + d + s + dbd + dbs config25, 10368 sims with mask
 run76	NILC cmb + d + s + dbd + dbs config26, 51840 sims with mask
 run77	HILC cmb + d + s + dbd + dbs config26, 51840 sims with mask
 
+# Re-run for paper
+# WARNING, here we made a change to the definition of beta_sync in nil_utils.
+# for all older scripts, if you want to rerun them, you have to set FID_BETA_SYNC=-5.0
+# instead of -3 (i.e. subtract 2). See run65_rerun as exampl.
+
+run80 NILC cmb + d + s + dbd + dbs config30, 51840 sims
+run81 NILC cmb + d + s + dbd + dbs config31 (no gamma), 51840 sims
+run82 NILC only, config30, 51840 sims
+run83 NILC cmb + d + s, config30, 51840 sims
+run84 NILC cmb + d + s, deproj but no maps, config30, 51840 sims
+run85 NILC cmb + d + s + dbd + dbs deproj but no maps, config30, 51840 sims
+run86 HILC like run80, config30, 51840 sims
+run86_beta like run86 but with fiducial_beta_sync=-5 and less sims
+run86_beta_xtra, extra 25000 sims for run86_beta
+run86_old  fiducial_beta_sync=-5, config22 (to see if run71 can be reproduced)
+run86_beta4 : like run86 but with fiducial_beta_sync=-4
+
+run87 NILC cmb + d + s, config22, 51840 sims, beta_s_pyilc = -1
+run88 NILC cmb + d + s, deproj but no maps, config22, 51840 sims, beta_s_pyilc = -1
+
+
 run52bt	test set with config21 otherwise same as 52b
 run52bt2 rerun of run52bt to test new code
 run56t 	test set with config21 otherwise same as 56
@@ -150,11 +172,15 @@ run59t	test set with config21 otherwise same as 59
 run61t	test set with config21 otherwise same as 61
 
 run65t	test set with config24 (only varying gamma params) otherwise same as 65
+run65t_rerun rerun for run65t
 run67t	test set with config24 (only varying gamma params) otherwise same as 67
 run68t	test set with config24 (only varying gamma params) otherwise same as 68
 run69t	test set with config24 (only varying gamma params) otherwise same as 69
 run70t	test set with config24 (only varying gamma params) otherwise same as 70
 run71t	test set with config24 (only varying gamma params) otherwise same as 71
+
+run87t	test set with config24 (only varying gamma params) otherwise same as 87
+run88t	test set with config24 (only varying gamma params) otherwise same as 88
 
 run65xtra extra test data for run65, used for e-moped compression in TARP test
 run65cov extra test data with fixed parameters rougly at PySM values.
@@ -198,8 +224,6 @@ run79t_d1s7 like above but with d1_s7
 run79t_d4s5 like above but with d4_s5
 run79t_d10s5 like above but with d10_s5
 run79t_d10alts5 like above but with d10alt_s5
-
-mcmc33  
 
 checkcov00    check analytic cov with Monte-Carlo
 
@@ -265,6 +289,7 @@ run59c_optuna_b : optuna for run59c cosmo_only
 run61c_optuna_b : optuna for run61c cosmo_only
 
 run65_optuna : optuna for run65
+run65_optuna_rerun : rerun of run65_optuna
 run66_optuna : optuna for run66
 run67_optuna : optuna for run67
 run68_optuna : optuna for run68
@@ -277,6 +302,7 @@ run65_optuna_10000 : optuna for run65 with nsim=10000
 run65_optuna_25000 : optuna for run65 with nsim=25000
 
 run65_optuna_b : optuna for run65 cosmo only
+run65_optuna_b_reurn : rerun of run65_optuna_b
 run66_optuna_b : optuna for run66 cosmo only
 run67_optuna_b : optuna for run67 cosmo only
 run68_optuna_b : optuna for run68 cosmo only
@@ -291,6 +317,16 @@ run65_optuna_b_25000 : optuna for run65 with nsim=25000 cosmo only
 run75_optuna : optuna for run75
 run76_optuna : optuna for run76
 run77_optuna : optuna for run77
+
+run86_optuna : optuna for run86
+run86_beta_optuna : optuna for run86_beta
+run86_beta_extra_optuna : optuna for run86_beta
+run86_old_optuna : optuna for run86_beta
+run86_beta4_optuna : optuna for run86_beta4
+
+run87_optuna : optuna for run87
+run88_optuna : optuna for run88
+
 
 sample52bt : sample the 52bt test set
 sample56t : sample the 56t test set
@@ -329,6 +365,7 @@ sample70_b   : sample the run70 test set with cosmo_only
 sample71_b   : sample the run71 test set with cosmo_only
 
 sample65t    : sample the run65t test set
+sample65t_rerun    : rerun of sample65t using prev reruns
 sample67t    : sample the run67t test set
 sample68t    : sample the run68t test set
 sample69t    : sample the run69t test set
@@ -336,6 +373,7 @@ sample70t    : sample the run70t test set
 sample71t    : sample the run71t test set
 
 sample65t_b  : sample the run65t test set with cosmo_only
+sample65t_b_rerun    : rerun of sample65t_b using prev reruns
 sample67t_b  : sample the run67t test set with cosmo_only
 sample68t_b  : sample the run68t test set with cosmo_only
 sample69t_b  : sample the run69t test set with cosmo_only
@@ -375,6 +413,9 @@ sample79t_d1s7	   : sample the run79t_d1s7 test set with the run77 model
 sample79t_d4s5	   : sample the run79t_d4s5 test set with the run77 model
 sample79t_d10s5	   : sample the run79t_d10s5 test set with the run77 model
 sample79t_d10alts5	   : sample the run79t_d10alts5 test set with the run77 model
+
+sample87 : sample the run87t test set
+sample88 : sample the run87t test set
 
 
 # THESE WERE ALL NOT NEEDED...##
