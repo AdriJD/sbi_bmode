@@ -1,6 +1,6 @@
 # sbi_bmode
 
-Code supporting arxiv:XXXX.XXXXX. `sbi_bmode` is a python library that combines Needlet-ILC with simulation-based inference to estimate the tensor-to-scalar ratio from CMB B-mode polarization data in the presence of complicated Galactic foregrounds.
+Code supporting [arxiv:2512.16869](https://arxiv.org/abs/2512.16869). `sbi_bmode` is a python library that combines Needlet-ILC with simulation-based inference to estimate the tensor-to-scalar ratio from CMB B-mode polarization data in the presence of complicated Galactic foregrounds.
 
 ### Dependencies
 
