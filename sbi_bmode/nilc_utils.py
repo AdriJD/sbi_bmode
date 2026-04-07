@@ -148,7 +148,8 @@ def get_nilc_maps(pyilc_path, map_tmpdir, nsplit, nside, fiducial_beta, fiducial
         pyilc_input_params['freq_map_files'] = \
             [f'{map_tmpdir}/map_split{split}_freq{f}.fits' for f in range(pyilc_input_params['N_freqs'])] 
         pyilc_input_params['save_as'] = 'fits'
-        
+        pyilc_input_params['work_in_healpix'] = True
+	 
         # NOTE, I should keep track of these failures. They should never reach 0.9, but values of
         # 1e-2 seem to be hard to avoid when deprojecting four sky components.
         pyilc_input_params['resp_tol'] = 10 # i.e. disable.
@@ -278,8 +279,8 @@ def get_nilc_maps(pyilc_path, map_tmpdir, nsplit, nside, fiducial_beta, fiducial
         stdout = open(os.path.join(nilc_tmpdir, 'stdout.txt'), "w") if not debug else None
 
         for c, comp in enumerate(comps):
-            subprocess.run([f"python {pyilc_path}/pyilc/main.py {all_yaml_files[c]}"],
-                           shell=True, env=env, stdout=stdout, stderr=subprocess.STDOUT)
+            yml_file = all_yaml_files[c]
+            subprocess.run(["python", "-m", "pyilc.main", yml_file], env=env, stdout=stdout, stderr=subprocess.STDOUT, check=True)
         if stdout is not None:
             stdout.close()
             
