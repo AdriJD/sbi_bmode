@@ -1,5 +1,5 @@
 '''
-Utils for simulating data using a simple Gaussian foreground model.
+Utils for simulating data using a fidutial lensing field.
 '''
 import os
 
@@ -11,7 +11,7 @@ import healpy as hp
 from jax import grad
 import jax.numpy as jnp
 
-from sbi_bmode import (spectra_utils, so_utils, nilc_utils, likelihood_utils,
+from sbi_bmode import (spectra_utils, so_utils, lenshILC_utils, likelihood_utils,
                        planck_utils, wmap_utils)
 
 opj = os.path.join
@@ -29,7 +29,7 @@ class CMBSimulator():
     fixed_params_dict : dict
         Dictionary with parameter names and values that we keep fixed.
     wavelet_type : str, optonal
-        Type of wavelets. For this pipeline specifically, it's called hILC_lens.        
+        Type of wavelets. For this pipeline specifically, it's called "hILC_lens".        
     fiducial_beta: float, optional
         Use this value for beta when building nilc maps.
     fiducial_T_dust: float, optional
@@ -43,8 +43,6 @@ class CMBSimulator():
     score_params: dict, optional
         Parameters of fiducial model where the score is evaluted for score
         compression.
-    coadd_equiv_crosses: bool, optional
-        Whether to use the mean of e.g. comp1 x comp2 and comp2 x comp1 spectra.
     apply_highpass_filter: bool, optional
         Filter out signal modes below lmin in the simulations.
     mask_file : str
@@ -59,7 +57,7 @@ class CMBSimulator():
                  wavelet_type='hILC_lens',
                  fiducial_beta=None, fiducial_T_dust=None, fiducial_beta_sync=None,
                  odir=None, norm_params=None, score_params=None,
-                 coadd_equiv_crosses=True, apply_highpass_filter=True, mask_file=None,
+                 apply_highpass_filter=True, mask_file=None,
                  fg_template_files=None):
 
         self.lmax = data_dict['lmax']
@@ -75,7 +73,6 @@ class CMBSimulator():
         self.odir = odir
 
         self.bins = np.arange(self.lmin, self.lmax, self.delta_ell)
-        self.coadd_equiv_crosses = coadd_equiv_crosses
 
         self.cov_scalar_ell = spectra_utils.get_cmb_spectra(
             opj(specdir, 'camb_lens_nobb.dat'), self.lmax)
@@ -337,7 +334,7 @@ class CMBSimulator():
                   seed, amp_beta_dust=None, gamma_beta_dust=None, A_s_BB=None,
                   alpha_s_BB=None, beta_sync=None,
                   amp_beta_sync=None, gamma_beta_sync=None, rho_ds=None,
-                  also_return_mf_data=False, draw_from_fg_template=False):
+                  draw_from_fg_template=False):
         '''
         Draw data realization.
 
@@ -369,8 +366,6 @@ class CMBSimulator():
             Tilt of synchrotron beta power spectrum.
         rho_ds : float, optional
             Correlation coefficient between dust and synchroton amplitudes.
-        also_return_mf_data : bool, optional
-            If set, additionally return the multi-frequency data vector.
         draw_from_fg_template : bool, optional
             If set, draw foregrounds from provided templates.
 
@@ -380,8 +375,6 @@ class CMBSimulator():
             Output dictionary with following key-value pairs:
                 data : (ndata) array
                     Data realization.
-                data_mf : (ndata_mf) array, optional
-                    Multi-frequency data, only if `also_return_mf_data` is True.
                 gamma_dust_ell : (lmax + 1) array, optional
                     Realization of the gamma_dust power spectrum
                 gamma_sync_ell : (lmax + 1) array, optional
@@ -414,23 +407,13 @@ class CMBSimulator():
         if self.mask is not None:
             omap *= self.mask            
         
-        # We always compute this even though not always needed, but cheap enough.
-        spectra_mf = estimate_spectra(omap, self.minfo, self.ainfo)
-        
-	 
-        if self.coadd_equiv_crosses:
-            spectra_mf = coadd(spectra_mf, self.sels_to_coadd_mf)
-
-        data_mf = get_final_data_vector(spectra_mf, self.bins)
+        # XS -- Change this to my simulation input.
+        data_spectra = lenshILC_utils.get_data_spectra(omap, bins = self.bins)
 
         if self.norm_params:
-            data_mf = self.get_norm_data(data_mf)
+            data_spectra = self.get_norm_data(data_spectra)
 
-        out = data_mf
-                
-        out_dict['data'] = out
-        if also_return_mf_data:
-            out_dict['data_mf'] = data_mf
+        out_dict['data'] = data_spectra
 
         return out_dict
         
