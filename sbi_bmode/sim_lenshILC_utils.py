@@ -11,6 +11,9 @@ import healpy as hp
 from jax import grad
 import jax.numpy as jnp
 
+import lenspyx
+from lenspyx import lensing
+
 from sbi_bmode import (spectra_utils, so_utils, lenshILC_utils, likelihood_utils,
                        planck_utils, wmap_utils)
 
@@ -401,13 +404,22 @@ class CMBSimulator():
                 A_s_BB=A_s_BB, alpha_s_BB=alpha_s_BB, beta_sync=beta_sync,
                 freq_pivot_sync=self.freq_pivot_sync, amp_beta_sync=amp_beta_sync,
                 gamma_beta_sync=gamma_beta_sync, rho_ds=rho_ds,
-                signal_filter=self.highpass_filter, no_cmb_ee=(self.mask is not None))
+                signal_filter=self.highpass_filter, no_cmb_ee=(self.mask is not None)) #This is generated lensed - data.
+            
         omap = out_dict['data']
 
         if self.mask is not None:
             omap *= self.mask            
+        #------------------------------
+        # XS; lenshILC compression methods
+        #------------------------------
+        # Expected omap shape:
+        # (nsplit, nfreq, npol, ny, nx)
+
+        # Generate mixing matrix:
+        A = build_mixing_matrix(freqs, )
+
         
-        # XS -- Change this to my simulation input.
         data_spectra = lenshILC_utils.get_data_spectra(omap, bins = self.bins)
 
         if self.norm_params:
