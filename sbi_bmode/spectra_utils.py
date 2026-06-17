@@ -185,7 +185,6 @@ def get_sed_sync(freq, beta, freq_pivot):
     out : float
         SED^2 evaluated at input freq.
     '''
-
     return (freq / freq_pivot) ** (2 * beta)
 
 def get_ell_shape(lmax, alpha, ell_pivot=80):

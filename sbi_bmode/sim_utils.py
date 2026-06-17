@@ -773,7 +773,7 @@ def gen_data(A_d_BB, alpha_d_BB, beta_dust, freq_pivot_dust, temp_dust,
              amp_beta_dust=None, gamma_beta_dust=None, A_s_BB=None,
              alpha_s_BB=None, beta_sync=None, freq_pivot_sync=None,
              amp_beta_sync=None, gamma_beta_sync=None, rho_ds=None,
-             signal_filter=None, no_cmb_ee=False):
+             signal_filter=None, no_cmb_ee=False, passband=None):
     '''
     Generate simulated maps.
 
@@ -833,6 +833,9 @@ def gen_data(A_d_BB, alpha_d_BB, beta_dust, freq_pivot_dust, temp_dust,
         Harmonic filter that is applied to the signal (similar to beam).
     no_cmb_ee : bool, optional
         If set, set EE cmb constribution to zero. Added for backwards compatibiliy.
+    passband: float, numpy array.
+        Amplitude of passband. Do not need normlized one.
+
 
     Returns
     -------
@@ -913,25 +916,29 @@ def gen_data(A_d_BB, alpha_d_BB, beta_dust, freq_pivot_dust, temp_dust,
         else:
             sync_map, beta_sync = None, None
 
-        gen_data_per_freq = lambda freq, cov_noise_ell, b_ell: _gen_data_per_freq_gamma(
+        gen_data_per_freq = lambda freq, cov_noise_ell, b_ell, passband: _gen_data_per_freq_gamma(
             freq, cov_noise_ell, beta_dust, temp_dust, freq_pivot_dust,
             cmb_alm, dust_map, nsplit, rngs_noise, ainfo, minfo, b_ell, sync_map=sync_map,
-            beta_sync=beta_sync, freq_pivot_sync=freq_pivot_sync)
+            beta_sync=beta_sync, freq_pivot_sync=freq_pivot_sync, passband=passband)
 
     else:
-        gen_data_per_freq = lambda freq, cov_noise_ell, b_ell: _gen_data_per_freq_simple(
+        gen_data_per_freq = lambda freq, cov_noise_ell, b_ell, passband: _gen_data_per_freq_simple(
             freq, cov_noise_ell, beta_dust, temp_dust, freq_pivot_dust,
             cmb_alm, fg_alm, nsplit, rngs_noise, ainfo, minfo, b_ell, beta_sync=beta_sync,
-            freq_pivot_sync=freq_pivot_sync)
+            freq_pivot_sync=freq_pivot_sync, passband=passband)
         
         gamma_dust_ell, gamma_sync_ell = None, None
         
     for fidx, freq in enumerate(freqs):
-        
+        if isinstance(freq, (int, float)): # assume delta function.
+            ipassband = 1.
+        else:
+            ipassband = passband[fidx]
+
         b_ell = b_ells[fidx]
         if signal_filter is not None:
             b_ell = b_ell * signal_filter
-        out[:,fidx,:,:] = gen_data_per_freq(freq, cov_noise_ell[fidx], b_ell)
+        out[:,fidx,:,:] = gen_data_per_freq(freq, cov_noise_ell[fidx], b_ell, ipassband)
 
     out_dict = {'data' : out}    
     if gamma_dust_ell is not None:
@@ -943,14 +950,14 @@ def gen_data(A_d_BB, alpha_d_BB, beta_dust, freq_pivot_dust, temp_dust,
 
 def _gen_data_per_freq_simple(freq, cov_noise_ell, beta_dust, temp_dust, freq_pivot_dust,
                               cmb_alm, fg_alm, nsplit, rngs_noise, ainfo, minfo, b_ell,
-                              beta_sync=None, freq_pivot_sync=None):
+                              beta_sync=None, freq_pivot_sync=None, passband=None):
     '''
     Generate data for a given frequency, using a data model with constant beta.
 
     Parameters
     ----------
-    freq : float
-        Effective freq of passband in Hz.
+    freq : float, numpy array.
+        Effective freqs of passband in Hz.
     cov_noise_ell : (npol, npol, nell) array
         Noise covariance matrix.
     beta_dust : float
@@ -977,18 +984,24 @@ def _gen_data_per_freq_simple(freq, cov_noise_ell, beta_dust, temp_dust, freq_pi
         Synchrotron frequency power law index.
     freq_pivot_sync : float, optional
         Pivot frequency for the synchrotron frequency power law in Hz.
+    passband: float, numpy array.
+        Amplitude of passband. Do not need normlized one.
 
     Returns
     -------
     out : (nsplit, 2, npix) array
         Stokes Q and U maps for each split.
     '''
-
+    
     out = np.zeros((nsplit, 2, minfo.npix))
-
     dust_factor = np.sqrt(spectra_utils.get_sed_dust(
         freq, beta_dust, temp_dust, freq_pivot_dust))
     dust_factor *= spectra_utils.get_g_fact(freq) / spectra_utils.get_g_fact(freq_pivot_dust)
+    print(dust_factor)
+    if isinstance(freq, (int, float)):
+        pass
+    else:
+        dust_factor = np.trapezoid(dust_factor*passband, freq)/np.trapezoid(passband, freq)
     
     signal_alm = cmb_alm.copy()
     signal_alm[1] += fg_alm[0] * dust_factor
@@ -1015,7 +1028,7 @@ def _gen_data_per_freq_simple(freq, cov_noise_ell, beta_dust, temp_dust, freq_pi
 
 def _gen_data_per_freq_gamma(freq, cov_noise_ell, beta_dust, temp_dust, freq_pivot_dust,
                              cmb_alm, dust_map, nsplit, rngs_noise, ainfo, minfo, b_ell,
-                             sync_map=None, beta_sync=None, freq_pivot_sync=None):
+                             sync_map=None, beta_sync=None, freq_pivot_sync=None, passband=1):
     '''
     Generate data for a given frequency, using a data model with varying beta.
 
@@ -1051,6 +1064,8 @@ def _gen_data_per_freq_gamma(freq, cov_noise_ell, beta_dust, temp_dust, freq_piv
         Beta synchrotron map, including monopole of beta.
     freq_pivot_sync : float
         Pivot frequency for the synchrotron frequency power law.
+    passband: float, numpy array.
+        Amplitude of passband. Do not need normlized one.
 
     Returns
     -------
@@ -1061,16 +1076,26 @@ def _gen_data_per_freq_gamma(freq, cov_noise_ell, beta_dust, temp_dust, freq_piv
     out = np.zeros((nsplit, 2, minfo.npix))
 
     # Apply spatially varying SED scaling in real space.
-    sed_map = spectra_utils.get_sed_dust(freq, beta_dust, temp_dust, freq_pivot_dust)
-    scaled_dust_map = dust_map * np.sqrt(sed_map)
-    scaled_dust_map *= spectra_utils.get_g_fact(freq) / spectra_utils.get_g_fact(freq_pivot_dust)
+    if isinstance(freq, (int, float)):
+        sed_dust_map = spectra_utils.get_sed_dust(freq, beta_dust, temp_dust, freq_pivot_dust)
+        scaled_dust_map = dust_map * np.sqrt(sed_dust_map)
+        scaled_dust_map *= spectra_utils.get_g_fact(freq) / spectra_utils.get_g_fact(freq_pivot_dust)
+    else:
+        scale_factors_multi_dust_freq = np.array([np.sqrt(spectra_utils.get_sed_dust(ifreq, beta_dust, temp_dust, freq_pivot_dust)) * spectra_utils.get_g_fact(ifreq) / spectra_utils.get_g_fact(freq_pivot_dust) for ifreq in freq])
+        scale_factors_dust = np.trapezoid(scale_factors_multi_dust_freq.T*passband, freq)/np.trapezoid(passband, freq)
+        scaled_dust_map = dust_map * scale_factors_dust
 
     fg_map = scaled_dust_map
     
     if sync_map is not None:
-        sed_sync_map = spectra_utils.get_sed_sync(freq, beta_sync, freq_pivot_sync)
-        scaled_sync_map = sync_map * np.sqrt(sed_sync_map)
-        scaled_sync_map *= spectra_utils.get_g_fact(freq) / spectra_utils.get_g_fact(freq_pivot_sync)
+        if isinstance(freq, (int, float)):
+            sed_sync_map = spectra_utils.get_sed_sync(freq, beta_sync, freq_pivot_sync)
+            scaled_sync_map = sync_map * np.sqrt(sed_sync_map)
+            scaled_sync_map *= spectra_utils.get_g_fact(freq) / spectra_utils.get_g_fact(freq_pivot_sync)
+        else:
+            scale_factors_multi_sync_freq = np.array([np.sqrt(spectra_utils.get_sed_sync(ifreq, beta_sync, freq_pivot_sync)) * spectra_utils.get_g_fact(ifreq) / spectra_utils.get_g_fact(freq_pivot_sync) for ifreq in freq])
+            scale_factors_sync = np.trapezoid(scale_factors_multi_sync_freq.T*passband, freq)/np.trapezoid(passband, freq)
+            scaled_sync_map = sync_map * scale_factors_sync
         fg_map += scaled_sync_map
         
     # Apply beam.
@@ -1080,9 +1105,9 @@ def _gen_data_per_freq_gamma(freq, cov_noise_ell, beta_dust, temp_dust, freq_piv
     signal_alm = alm_c_utils.lmul(signal_alm, b_ell, ainfo, inplace=False)
 
     for sidx in range(nsplit):
-
         data_alm = signal_alm + alm_utils.rand_alm(
             cov_noise_ell, ainfo, rngs_noise[sidx], dtype=np.complex128)
+        data_alm = signal_alm
         data_alm = np.asarray(data_alm, dtype=np.complex128)
         sht.alm2map(data_alm, out[sidx], ainfo, minfo, 2)
 
