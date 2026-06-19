@@ -535,6 +535,8 @@ class CMBSimulator():
             out_dict['data_mf'] = data_mf
 
         return out_dict
+
+    
         
     def get_norm_data(self, data):
         '''

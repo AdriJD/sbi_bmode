@@ -1,11 +1,11 @@
 import numpy as np
 import healpy as hp
-from pixell import utils
+from pixell import utils, curvedsky
 import lenspyx #Must for lensing operator construction.
 from lenspyx import lensing
 from lenspyx.utils import camb_clfile
 from lenspyx.utils_hp import synalm, almxfl
-import importlib.resources as ir
+from pathlib import Path #Import data files
 
 def contract_almxblm(alm, blm):
     """
@@ -21,7 +21,7 @@ def contract_almxblm(alm, blm):
     had_sum -= np.real(np.sum(alm[..., :lmax+1] * blm[..., :lmax+1]))
     return had_sum
 
-def compute_cinv_pol(dpol, ainfo, bin_size=20, eps=1e-6):
+def compute_cinv_pol(dpol, ainfo, bin_size=20):
     """
     Per-ell inverse covariance for pol=(E,B).
     Frequency correlatedpol covariance is FULL in stacked (E,B) space
@@ -43,31 +43,34 @@ def compute_cinv_pol(dpol, ainfo, bin_size=20, eps=1e-6):
     bidx = ells // bin_size
 
     xpol = dpol.reshape(2 * nfreq, nalm)
-    cl_pol = ainfo.alm2cl(xpol[:, None, :], xpol[None, :, :])
+    cl_pol = ainfo.alm2cl(xpol[:, None, :], xpol[None, :, :]) #Raw covariance dpol contract.
 
-    clb_pol = np.zeros_like(cl_pol)
+    clb_pol = np.zeros_like(cl_pol) #Binned covariance regulate.
+    
     for b in np.unique(bidx):
         sel = (bidx == b)
         cbin = cl_pol[:, :, sel].mean(axis=2)
         clb_pol[:, :, sel] = cbin[:, :, None]
 
-    eye = np.eye(2 * nfreq, dtype=clb_pol.dtype)[:, :, None]
-    clb_pol = clb_pol + eps * eye
-    cinv_pol = utils.eigpow(clb_pol, -1, axes=[0, 1])
+   # eye = np.eye(2 * nfreq, dtype=clb_pol.dtype)[:, :, None] XS: Shouldn't need; even tho suggested.
+   # clb_pol = clb_pol + eps * eye
+    cinv_pol = utils.eigpow(clb_pol, -1, axes=[0, 1]) #Inversed BINNED covariance.
 
     return cl_pol, clb_pol, cinv_pol
 
 
-def apply_cinv_pol(dpol, cinv_pol, ainfo):
+def apply_cinv_pol(dpol, cinv_pol, ainfo): #Apply C^-1 onto generated data d.
     nfreq, npol, nalm = dpol.shape
     dflat = dpol.reshape(2 * nfreq, nalm) # (nfreq, 2, nalm)
     out = ainfo.lmul(dflat, cinv_pol)     # (nfreq, 2, nalm)
     return out.reshape(nfreq, 2, nalm)
 
 
-def build_preconditioner_pol(A, cinv_pol, ainfo):
+def build_preconditioner_pol(A, cinv_pol, ainfo): #Build M = (A^TC^-1A)
     """
     pol preconditioners: (full EB coupling).
+
+    M = diag(M_E, M_B). M_E/B = A^T(Cinv_pol)A. Notice the full inversion of the covariance.
 
     Parameters
     ----------
@@ -108,14 +111,60 @@ def build_preconditioner_pol(A, cinv_pol, ainfo):
 
     return minv_pol, precond_op
 
+# ---------------------------
+#Generate mixing matrix A.
+# ---------------------------
 
-def make_normal_operator(mixing_operator, cinv_pol, ainfo):
-    #N = Lmix^dagger C^-1 Lmix 
-    def normal_op(spol):
-        dpol = mixing_operator.forward(spol)
-        wd = apply_cinv_pol(dpol, cinv_pol, ainfo)
-        return mixing_operator.adjoint(wd)
-    return normal_op
+def build_A(
+    A_d_BB,
+    alpha_d_BB,
+    beta_dust,
+    amp_beta_dust=None,
+    gamma_beta_dust=None,
+    A_s_BB=None,
+    alpha_s_BB=None,
+    beta_sync=None,
+    amp_beta_sync=None,
+    gamma_beta_sync=None
+):
+    """
+    Build mixing matrix A from draw_data params.
+
+    Returns
+    -------
+    A : ndarray
+        Mixing matrix with Shape (n_freq, n_comp).
+    """
+
+    freqs_ghz = np.array([25., 27., 39., 93., 145., 225., 280., 350.]) #HardCode frequencies for now.
+    beta_d = beta_dust
+    beta_s = beta_sync if beta_sync is not None else -3.0
+    Td = 19.6
+    nu0_d = 353.0
+    nu0_s = 23.0
+        
+    include = ["cmb", "dust"]
+
+    if amp_beta_dust is not None:
+        include.append("dust_beta1")
+    if beta_sync is not None:
+        include.append("sync")
+
+        if amp_beta_sync is not None:
+            include.append("sync_beta1")
+
+    colmap = {
+        "cmb": lambda f: cmb_sed(f),
+        "dust": lambda f: dust_sed(f, beta=beta_d, Td=Td, nu0=nu0_d),
+        "dust_beta1": lambda f: dust_sed_beta1(f, beta=beta_d, Td=Td, nu0=nu0_d),
+        "sync": lambda f: sync_sed(f, beta=beta_s, nu0=nu0_s),
+        "sync_beta1": lambda f: sync_sed_beta1(f, beta=beta_s, nu0=nu0_s),
+    }
+
+    Acols = [colmap[name](freqs_ghz) for name in include]
+    A = np.vstack(Acols).T
+
+    return A, tuple(include)
 
 #Define a operator
 class Op:
@@ -130,7 +179,7 @@ class Op:
     def adjoint(self, y):
         return self._adj(y)
 
-#Define a lensing operator from lenspyx
+#Define a lensing operator L from lenspyx
 class LensingOperator(Op):
     """
     Polarization-only lensing operator.
@@ -177,6 +226,7 @@ class LensingOperator(Op):
 
         self.pol = self
 
+#Define Lmix(A, L)
 class Lmix(Op):
     """
     Mixing + optional lensing operator, polarization only.
@@ -254,66 +304,45 @@ class Lmix(Op):
             return sPol
         super().__init__(fwd=fwd_pol, adj=adj_pol)
 
+    
 # ---------------------------
-#Generate mixing matrix.
+#Generate normal operator N = Lmix^dagger C^-1 Lmix 
 # ---------------------------
 
-def build_A(
-    A_d_BB,
-    alpha_d_BB,
-    beta_dust,
-    amp_beta_dust=None,
-    gamma_beta_dust=None,
-    A_s_BB=None,
-    alpha_s_BB=None,
-    beta_sync=None,
-    amp_beta_sync=None,
-    gamma_beta_sync=None
-):
-    """
-    Build mixing matrix A from draw_data params.
-
-    Returns
-    -------
-    A : ndarray
-        Mixing matrix with Shape (n_freq, n_comp).
-    """
-
-    freqs_ghz = np.array([25., 27., 39., 93., 145., 225., 280., 350.]) #HardCode frequencies for now.
-    beta_d = beta_dust
-    beta_s = beta_sync if beta_sync is not None else -3.0
-    Td = 19.6
-    nu0_d = 353.0
-    nu0_s = 23.0
-        
-    include = ["cmb", "dust"]
-
-    if amp_beta_dust is not None:
-        include.append("dust_beta1")
-
-    if beta_sync is not None:
-        include.append("sync")
-
-        if amp_beta_sync is not None:
-            include.append("sync_beta1")
-
-    colmap = {
-        "cmb": lambda f: cmb_sed(f),
-        "dust": lambda f: dust_sed(f, beta=beta_d, Td=Td, nu0=nu0_d),
-        "dust_beta1": lambda f: dust_sed_beta1(f, beta=beta_d, Td=Td, nu0=nu0_d),
-        "sync": lambda f: sync_sed(f, beta=beta_s, nu0=nu0_s),
-        "sync_beta1": lambda f: sync_sed_beta1(f, beta=beta_s, nu0=nu0_s),
-    }
-
-    Acols = [colmap[name](freqs_ghz) for name in include]
-    A = np.vstack(Acols).T
-
-    return A, tuple(include)
-
-#Define sed functions:
+def make_normal_operator(mixing_operator, cinv_pol, ainfo): 
+    def normal_op(spol):
+        dpol = mixing_operator.forward(spol)
+        wd = apply_cinv_pol(dpol, cinv_pol, ainfo)
+        return mixing_operator.adjoint(wd)
+    return normal_op
+    
 # ---------------------------
-#Dust SED + first moment wrt beta_d
+#Define sed functions to be used by mixing matrix:
 # ---------------------------
+
+# --- CMB SED (in K_CMB units it's flat)
+def cmb_sed(freq_ghz):
+    return np.ones_like(freq_ghz, dtype=float)
+
+
+# --- Generic
+def Bnu(nu_hz, T):
+    h = 6.62607015e-34
+    k = 1.380649e-23
+    c = 299792458.0
+    Tcmb = 2.7255  # K
+    x = h * nu_hz / (k * T)
+    return (2.0 * h * nu_hz**3 / c**2) / np.expm1(x)
+
+def f_nu(nu_hz):
+    # intensity -> uK_CMB: (dBv/dT | Tcmb)^-1  (up to constant factor)
+    h = 6.62607015e-34
+    k = 1.380649e-23
+    c = 299792458.0
+    Tcmb = 2.7255  # K
+    x = h * nu_hz / (k * Tcmb)
+    ex = np.exp(x)
+    return ((ex - 1.0) / x) ** 2 / ex
 
 def mu_dust(freq_ghz, beta=1.5, Td=19.6):
     nu = np.asarray(freq_ghz, float) * 1e9
@@ -361,17 +390,20 @@ def sync_sed_beta1(freq_ghz, beta=-3.0, nu0=23.0):
     return A * np.log(nu / float(nu0))
 
 # ---------------------------
-#Generate deflection field from lensing field phi.
+#Generate deflection field from lensing file PP col. 
+#Check if this file make sense.
 # ---------------------------
 
-def generate_defl(lmax_len, nside, seed, , dlmax=500, epsilon=1e-6):
+DATA_DIR = Path(__file__).resolve().parent.parent / "data"
+LENSPOTENTIAL_CLS = DATA_DIR / "planck_2018_lenspotentialCls.dat"
+
+
+def generate_defl(lmax_len, nside, seed, dlmax=500, epsilon=1e-6):
     if seed is not None:
         np.random.seed(int(seed))
-
+    #Path and files
     lmax_unl = int(lmax_len + dlmax)
-
-    cls_path = ir.files("../data/") #Load it somewhere.
-    cl_unl = camb_clfile(str(cls_path / "FFP10_wdipole_lenspotentialCls.dat"))
+    cl_unl = camb_clfile(str(LENSPOTENTIAL_CLS))
     plm = synalm(cl_unl["pp"], lmax=lmax_unl, mmax=lmax_unl)
 
     ell = np.arange(lmax_unl + 1)
@@ -382,9 +414,8 @@ def generate_defl(lmax_len, nside, seed, , dlmax=500, epsilon=1e-6):
     return defl
 
 class CGComponentReconstructor:
-    def __init__(self, bin_size=20, eps=1e-6, cg_maxiter=500, cg_tol=1e-12):
+    def __init__(self, bin_size=20, cg_maxiter=500, cg_tol=1e-12):
         self.bin_size = bin_size
-        self.eps = eps
         self.cg_maxiter = cg_maxiter
         self.cg_tol = cg_tol
         self.A = None
@@ -406,8 +437,7 @@ class CGComponentReconstructor:
             dpol = d_alm_obs[s]
 
             _, _, cinv_pol = compute_cinv_pol(
-                dpol, ainfo=ainfo, bin_size=self.bin_size, eps=self.eps
-            )
+                dpol, ainfo=ainfo, bin_size=self.bin_size)
 
             rhs = self.Mx.adjoint(apply_cinv_pol(dpol, cinv_pol, ainfo))
             _, precond = build_preconditioner_pol(self.A, cinv_pol, ainfo)
@@ -430,48 +460,3 @@ class CGComponentReconstructor:
             out[s] = cg.x
 
         return out
-
-
-#-----------Make CG output into binned Cl_EE and Cl__BB for training -------------------
-def bin_cls(cls, bins):
-    ells = np.arange(len(cls))
-    out = np.zeros(len(bins) - 1, dtype=float)
-
-    for i in range(len(out)):
-        m = (ells >= bins[i]) & (ells < bins[i + 1])
-        if np.any(m):
-            out[i] = np.mean(cls[m])
-
-    return out
-
-def compress_to_data_vector(s_delensed_alm, ainfo, bins):
-    """
-    Output binned CMB EE and BB spectra.
-
-    Parameters
-    ----------
-    s_delensed_alm : ndarray
-        Shape (ncomp, 2, nalm), axis 1 is (E, B).
-        Assumes component 0 is CMB.
-    ainfo : object
-        Has alm2cl method.
-    bins : ndarray
-        Bin edges.
-
-    Returns
-    -------
-    data : ndarray
-        Concatenated [Cl_EE_binned, Cl_BB_binned].
-    """
-    alm_E = s_delensed_alm[0, 0]
-    alm_B = s_delensed_alm[0, 1]
-
-    cl_EE = ainfo.alm2cl(alm_E)
-    cl_BB = ainfo.alm2cl(alm_B)
-
-    cl_EE_binned = bin_cls(cl_EE, bins)
-    cl_BB_binned = bin_cls(cl_BB, bins)
-
-    data = np.concatenate([cl_EE_binned, cl_BB_binned])
-
-    return data

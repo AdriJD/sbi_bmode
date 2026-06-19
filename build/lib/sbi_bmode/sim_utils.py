@@ -1,6 +1,7 @@
 '''
-Utils for simulating data using a fidutial lensing field.
+Utils for simulating data using a simple Gaussian foreground model.
 '''
+
 import os
 
 import numpy as np
@@ -11,10 +12,7 @@ import healpy as hp
 from jax import grad
 import jax.numpy as jnp
 
-import lenspyx
-from lenspyx import lensing
-
-from sbi_bmode import (spectra_utils, so_utils, lenshILC_utils, likelihood_utils,
+from sbi_bmode import (spectra_utils, so_utils, nilc_utils, likelihood_utils,
                        planck_utils, wmap_utils)
 
 opj = os.path.join
@@ -31,8 +29,38 @@ class CMBSimulator():
         Dictionary with data generation parameters.
     fixed_params_dict : dict
         Dictionary with parameter names and values that we keep fixed.
+    pyilcdir: str
+        Path to pyilc respository. Setting to None means NILC is not used.
     wavelet_type : str, optonal
-        Type of wavelets. For this pipeline specifically, it's called "hILC_lens".        
+        Type of wavelets. Note, use "TopHatHarmonic" for harmonic ILC.        
+    use_dust_map: bool, optional
+        Only relevant if using nilc (pyilc dir is not None). Whether
+        to build map of dust and include it in auto- and cross-spectra in
+        the data vector
+    use_dbeta_map: bool, optional
+        Only relevant if using nilc (pyilc dir is not None). Whether
+        to build map of first moment w.r.t. beta and include it in
+        auto- and cross-spectra in the data vector
+    use_sync_map: bool, optional
+        Only relevant if using nilc (pyilc dir is not None). Whether
+        to build map of synchrotron and include it in auto- and cross-spectra in
+        the data vector
+    use_dbeta_sync_map: bool, optional
+        Only relevant if using nilc (pyilc dir is not None). Whether
+        to build map of first moment w.r.t. beta_synchrotron and include it in
+        auto- and cross-spectra in the data vector
+    deproj_dust: bool, optional
+        Only relevant if using nilc (pyilc dir is not None). Whether to
+        deproject dust in CMB NILC map.
+    deproj_dbeta: bool, optional
+        Only relevant if using nilc (pyilc dir is not None). Whether to
+        deproject first moment of dust w.r.t. beta in CMB NILC map.
+    deproj_sync: bool, optional
+        Only relevant if using nilc (pyilc dir is not None). Whether to
+        deproject synchrotron in CMB NILC map.
+    deproj_dbeta_sync: bool, optional
+        Only relevant if using nilc (pyilc dir is not None). Whether to
+        deproject first moment of synchrotron w.r.t. beta in CMB NILC map.
     fiducial_beta: float, optional
         Use this value for beta when building nilc maps.
     fiducial_T_dust: float, optional
@@ -46,6 +74,8 @@ class CMBSimulator():
     score_params: dict, optional
         Parameters of fiducial model where the score is evaluted for score
         compression.
+    coadd_equiv_crosses: bool, optional
+        Whether to use the mean of e.g. comp1 x comp2 and comp2 x comp1 spectra.
     apply_highpass_filter: bool, optional
         Filter out signal modes below lmin in the simulations.
     mask_file : str
@@ -56,11 +86,13 @@ class CMBSimulator():
         are 'dust' and 'sync'. Inner keys have to match the band names in the config.
     '''
 
-    def __init__(self, specdir, data_dict, fixed_params_dict,
-                 wavelet_type='hILC_lens',
+    def __init__(self, specdir, data_dict, fixed_params_dict, pyilcdir=None,
+                 wavelet_type='GaussianNeedlets', use_dust_map=True, use_dbeta_map=False,
+                 use_sync_map=False, use_dbeta_sync_map=False, deproj_dust=False,
+                 deproj_dbeta=False, deproj_sync=False, deproj_dbeta_sync=False,
                  fiducial_beta=None, fiducial_T_dust=None, fiducial_beta_sync=None,
                  odir=None, norm_params=None, score_params=None,
-                 apply_highpass_filter=True, mask_file=None,
+                 coadd_equiv_crosses=True, apply_highpass_filter=True, mask_file=None,
                  fg_template_files=None):
 
         self.lmax = data_dict['lmax']
@@ -68,14 +100,22 @@ class CMBSimulator():
         self.nside = data_dict['nside']
         self.nsplit = data_dict['nsplit']
         self.delta_ell = data_dict['delta_ell']
-
+        self.pyilcdir = pyilcdir
         self.wavelet_type = wavelet_type
+        self.use_dust_map = use_dust_map
+        self.use_dbeta_map = use_dbeta_map
+        self.use_sync_map = use_sync_map
+        self.use_dbeta_sync_map = use_dbeta_sync_map        
+        self.deproj_dust = deproj_dust
+        self.deproj_dbeta = deproj_dbeta
+        self.deproj_sync = deproj_sync
+        self.deproj_dbeta_sync = deproj_dbeta_sync        
         self.fiducial_beta = fiducial_beta
         self.fiducial_T_dust = fiducial_T_dust
         self.fiducial_beta_sync = fiducial_beta_sync
         self.odir = odir
-
         self.bins = np.arange(self.lmin, self.lmax, self.delta_ell)
+        self.coadd_equiv_crosses = coadd_equiv_crosses
 
         self.cov_scalar_ell = spectra_utils.get_cmb_spectra(
             opj(specdir, 'camb_lens_nobb.dat'), self.lmax)
@@ -86,9 +126,11 @@ class CMBSimulator():
         self.ainfo = curvedsky.alm_info(self.lmax)
 
         freq_strings = data_dict['freq_strings']
+
         beam_fwhms = [self.get_beam_fwhms(fstr) for fstr in freq_strings]
-        
-        self.freq_strings = list(data_dict['freq_strings'])
+        # We re-order the freq_strings based on FWHM because pyilc requires that.
+        freq_strings_ordered = np.asarray(freq_strings)[np.argsort(np.asarray(beam_fwhms))][::-1]
+        self.freq_strings = [str(fstr) for fstr in freq_strings_ordered]
         self.beam_fwhms = [self.get_beam_fwhms(fstr) for fstr in self.freq_strings]
         self.freqs = [self.get_freqs(fstr) for fstr in self.freq_strings]        
         assert np.all(np.asarray(self.freqs) > 1e9), 'Frequencies have to be in Ghz.'
@@ -109,9 +151,30 @@ class CMBSimulator():
         else:
             self.highpass_filter = None
 
-        self.sels_to_coadd = get_coadd_sels(self.nsplit, self.nfreq)
-        self.size_data = len(self.sels_to_coadd) * (self.bins.size - 1)
+        if pyilcdir:
+            self.ncomp = 1
+            if self.use_dust_map: self.ncomp += 1
+            if self.use_dbeta_map: self.ncomp += 1
+            if self.use_sync_map: self.ncomp += 1
+            if self.use_dbeta_sync_map: self.ncomp += 1
+            
+            self.sels_to_coadd = get_coadd_sels(self.nsplit, self.ncomp)
+            self.size_data = len(self.sels_to_coadd) * (self.bins.size - 1)
+            if self.use_dust_map or self.deproj_dust or self.deproj_dbeta:
+                assert self.fiducial_beta is not None
+                assert self.fiducial_T_dust is not None
+            if self.use_sync_map or self.deproj_sync or self.deproj_dbeta_sync:
+                assert self.fiducial_beta_sync is not None
+        else:
+            self.sels_to_coadd = get_coadd_sels(self.nsplit, self.nfreq)
+            self.size_data = len(self.sels_to_coadd) * (self.bins.size - 1)
 
+        # This is redundant in the case where we're not using pyilc, but
+        # in the case we are using pyilc, these are useful to create multi-freq
+        # test sets.
+        self.sels_to_coadd_mf = get_coadd_sels(self.nsplit, self.nfreq)
+        self.size_data_mf = len(self.sels_to_coadd_mf) * (self.bins.size - 1)
+            
         self.sensitivity_mode = data_dict['sensitivity_mode']
         self.lknee_mode = data_dict['lknee_mode']
         self.noise_cov_ell = np.ones((self.nfreq, 2, 2, self.lmax + 1))
@@ -131,11 +194,11 @@ class CMBSimulator():
         self.temp_dust = fixed_params_dict['temp_dust']
 
         self.norm_params = norm_params
-        if self.norm_params:
+        if self.norm_params and pyilcdir is None:
 
             # UPDATE WITH SYNC.
             self.norm_model = np.asarray(self.get_signal_spectra(
-                norm_params['r_tensor'], norm_params['A_d_BB'],
+                norm_params['r_tensor'], norm_params['A_lens'], norm_params['A_d_BB'],
                 norm_params['alpha_d_BB'], norm_params['beta_dust']))
             noise_spectra = self.get_noise_spectra()
             norm_cov = likelihood_utils.get_cov(
@@ -145,14 +208,14 @@ class CMBSimulator():
             self.isqrt_norm_cov = mat_utils.matpow(norm_cov, -0.5, return_diag=True)
 
         self.score_params = score_params
-        if self.score_params:
+        if self.score_params and pyilcdir is None:
 
             # UPDATE WITH SYNC.
             if self.score_params and self.norm_params:
                 raise ValueError('Cannot have both norm_params and score_params')
 
             self.score_model = np.asarray(self.get_signal_spectra(
-                score_params['r_tensor'], score_params['A_d_BB'],
+                score_params['r_tensor'], score_params['A_lens'], score_params['A_d_BB'],
                 score_params['alpha_d_BB'], score_params['beta_dust']))
             noise_spectra = self.get_noise_spectra()
             cov = likelihood_utils.get_cov(
@@ -162,7 +225,7 @@ class CMBSimulator():
             icov = mat_utils.matpow(cov, -1, return_diag=True)
 
             score_params_arr = jnp.asarray(
-                [score_params['r_tensor'], score_params['A_d_BB'],
+                [score_params['r_tensor'], score_params['A_lens'], score_params['A_d_BB'],
 		 score_params['alpha_d_BB'], score_params['beta_dust']])
 
             def get_loglike(params, data):
@@ -256,7 +319,7 @@ class CMBSimulator():
         else:
             raise ValueError(f'{fstr=} not recognized')
         
-    def get_signal_spectra(self, r_tensor, A_d_BB, alpha_d_BB, beta_dust,
+    def get_signal_spectra(self, r_tensor, A_lens, A_d_BB, alpha_d_BB, beta_dust,
                            A_s_BB=None, alpha_s_BB=None, beta_sync=None, rho_ds=None):
         '''
         Generate binned signal frequency cross spectra.
@@ -265,6 +328,8 @@ class CMBSimulator():
         ----------
         r_tensor : float
             Tensor-to-scalar ratio.
+        A_lens : float
+            A_lens parameter.
         A_d_BB : float
             Amplitude of dust power spectrum.
         alpha_d_BB : float
@@ -302,7 +367,7 @@ class CMBSimulator():
         
         # Only adding the BB part because `get_dust_spectra` only produces BB.
         cov_ell = cov_ell.at[:].add(spectra_utils.get_combined_cmb_spectrum(
-            r_tensor, self.cov_scalar_ell, self.cov_tensor_ell)[1,1])
+            r_tensor, A_lens, self.cov_scalar_ell, self.cov_tensor_ell)[1,1])
 
         cov_ell = spectra_utils.apply_beam_to_freq_cov(cov_ell, self.b_ells)
 
@@ -334,29 +399,20 @@ class CMBSimulator():
 
         return cov_bin
 
-    def draw_data(self, r_tensor, A_d_BB, alpha_d_BB, beta_dust,
+    def draw_data(self, r_tensor, A_lens, A_d_BB, alpha_d_BB, beta_dust,
                   seed, amp_beta_dust=None, gamma_beta_dust=None, A_s_BB=None,
                   alpha_s_BB=None, beta_sync=None,
                   amp_beta_sync=None, gamma_beta_sync=None, rho_ds=None,
-                  draw_from_fg_template=False,
-                  #XS -- adding new parts.
-                  return_maps=False,
-                  return_alms=False, 
-                  use_lensing_operator=False,
-                  lens_seed=None,
-                  lens_dlmax=500,
-                  lens_epsilon=1e-6,
-                  lens_components=(0,),
-                  cg_bin_size=20,
-                  cg_maxiter=500,
-                  cg_tol=1e-12):
+                  also_return_mf_data=False, draw_from_fg_template=False):
         '''
-        Draw data realization. Added cg criteria.
+        Draw data realization.
 
         Parameters
         ----------
         r_tensor : float
             Tensor-to-scalar ratio.
+        A_lens : float
+            Amplitude of lensing contribution to BB.
         A_d_BB : float
             Dust amplitude.
         alpha_d_BB : float
@@ -381,64 +437,10 @@ class CMBSimulator():
             Tilt of synchrotron beta power spectrum.
         rho_ds : float, optional
             Correlation coefficient between dust and synchroton amplitudes.
+        also_return_mf_data : bool, optional
+            If set, additionally return the multi-frequency data vector.
         draw_from_fg_template : bool, optional
             If set, draw foregrounds from provided templates.
-            
-        return_maps : bool, optional
-            If True, keep the simulated Q/U maps in the output dictionary under
-            out_dict["maps"]. The shape is (nsplit, nfreq, 2, npix).
-            This is mainly useful for debugging and tests. The default is False.
-
-        return_alms : bool, optional
-            If True, keep the multifrequency E/B harmonic coefficients 
-            passed to the lenshILC CG solver under out_dict["data_alms"]. 
-            The shape is (nsplit, nfreq, 2, nalm). The default is False.
-
-        use_lensing_operator : bool, optional
-            If True, construct a lensing operator using
-            lenshILC_utils.generate_defl and
-            lenshILC_utils.LensingOperator and use it inside Lmix.
-            If False, use an identity lensing operator. The identity option is
-            useful for fast smoke tests of the mixing, covariance, and CG
-            reconstruction without lenspyx remapping. The default is False.
-
-        lens_seed : int, optional
-            Random seed used to generate the lensing deflection field when
-            use_lensing_operator is True. If None, a seed is drawn from the
-            main random number generator. Ignored when use_lensing_operator
-            is False.
-
-        lens_dlmax : int, optional
-            Extra multipole range used when generating the lensing deflection
-            field. Passed to lenshILC_utils.generate_defl as dlmax.
-            Ignored when use_lensing_operator is False. The default is 500.
-
-        lens_epsilon : float, optional
-            Accuracy parameter passed to the lenspyx deflection object through
-            lenshILC_utils.generate_defl. Ignored when use_lensing_operator is False. The default is 1e-6.
-
-        lens_components : tuple of int, optional
-            Indices of components to which the lensing operator is applied
-            inside lenshILC_utils.Lmix. For example, (0,) means lens
-            only the first component, typically CMB. Use () to apply no
-            lensing, which is appropriate when use_lensing_operator is
-            False. The default is (0,).
-
-        cg_bin_size : int, optional
-            Multipole bin size used when estimating and regularizing the
-            empirical inverse covariance in
-            lenshILC_utils.compute_cinv_pol. Passed to
-            lenshILC_utils.CGComponentReconstructor. The default is 20.
-
-        cg_maxiter : int, optional
-            Maximum number of conjugate-gradient iterations used by
-            lenshILC_utils.CGComponentReconstructor.solve_components.
-            The default is 500.
-
-        cg_tol : float, optional
-            Relative convergence tolerance for the conjugate-gradient solve.
-            Passed to lenshILC_utils.CGComponentReconstructor. The default
-            is 1e-12.
 
         Returns
         -------
@@ -446,6 +448,8 @@ class CMBSimulator():
             Output dictionary with following key-value pairs:
                 data : (ndata) array
                     Data realization.
+                data_mf : (ndata_mf) array, optional
+                    Multi-frequency data, only if `also_return_mf_data` is True.
                 gamma_dust_ell : (lmax + 1) array, optional
                     Realization of the gamma_dust power spectrum
                 gamma_sync_ell : (lmax + 1) array, optional
@@ -458,7 +462,7 @@ class CMBSimulator():
 
         if draw_from_fg_template:
             out_dict = gen_data_fg_template(
-                self.fg_templates, r_tensor, self.freq_strings,
+                self.fg_templates, r_tensor, A_lens, self.freq_strings,
                 seed, self.nsplit, self.noise_cov_ell, self.cov_scalar_ell,
                 self.cov_tensor_ell, self.b_ells, self.minfo, self.ainfo,
                 signal_filter=self.highpass_filter, no_cmb_ee=(self.mask is not None))
@@ -466,127 +470,72 @@ class CMBSimulator():
         else:
             out_dict = gen_data(
                 A_d_BB, alpha_d_BB, beta_dust, self.freq_pivot_dust, self.temp_dust,
-                r_tensor, self.freqs, seed, self.nsplit, self.noise_cov_ell,
+                r_tensor, A_lens, self.freqs, seed, self.nsplit, self.noise_cov_ell,
                 self.cov_scalar_ell, self.cov_tensor_ell, self.b_ells, self.minfo, self.ainfo,
                 amp_beta_dust=amp_beta_dust, gamma_beta_dust=gamma_beta_dust,
                 A_s_BB=A_s_BB, alpha_s_BB=alpha_s_BB, beta_sync=beta_sync,
                 freq_pivot_sync=self.freq_pivot_sync, amp_beta_sync=amp_beta_sync,
                 gamma_beta_sync=gamma_beta_sync, rho_ds=rho_ds,
-                signal_filter=self.highpass_filter, no_cmb_ee=(self.mask is not None)) #This is generated lensed - data.
-            
+                signal_filter=self.highpass_filter, no_cmb_ee=(self.mask is not None))
         omap = out_dict['data']
 
         if self.mask is not None:
-            omap *= self.mask[None, None, None, :]
-
-        if return_maps:
-            out_dict["maps"] = omap.copy() # omap shape: (nsplit, nfreq, 2, npix)
-
-        # ------------------------------------------------------------
-        # lenshILC / CG branch.
-
-        # Build A -> Build L -> Build Lmix(L, A) 
-        # ------------------------------------------------------------
-
-        A, components = lenshILC_utils.build_A(
-            A_d_BB = A_d_BB,
-            alpha_d_BB = alpha_d_BB,
-            beta_dust = beta_dust,
-            amp_beta_dust = amp_beta_dust,
-            gamma_beta_dust = gamma_beta_dust,
-            A_s_BB = A_s_BB,
-            alpha_s_BB = alpha_s_BB,
-            beta_sync = beta_sync,
-            amp_beta_sync = amp_beta_sync,
-            gamma_beta_sync = gamma_beta_sync,
-        )
-        A = np.asarray(A, dtype=float)
-
-        if A.shape[0] != self.nfreq:
-            raise ValueError(
-                "lenshILC mixing matrix and simulated data have inconsistent "
-                "frequency channels: "
-                f"A.shape={A.shape}, self.nfreq={self.nfreq}."
-            )
-
-        if use_lensing_operator:
-            if lens_seed is None:
-                lens_seed = int(seed.integers(0, 2**32 - 1))
-                
-            defl = lenshILC_utils.generate_defl(
-                lmax_len = self.lmax,
-                nside = self.nside,
-                seed = int(lens_seed),
-                dlmax = lens_dlmax,
-                epsilon = lens_epsilon,
-            )
-            L = lenshILC_utils.LensingOperator(defl, self.lmax)
-        else:
-            class IdentityLensing: #For testing
-                def forward(self, x):
-                    return np.asarray(x, dtype = np.complex128).copy()
-                def adjoint(self, x):
-                    return np.asarray(x, dtype = np.complex128).copy()
-            L = IdentityLensing()
-
-        #Get Lmix
-        Lx = lenshILC_utils.Lmix(L = L, A = A, lens_components = list(lens_components),)
+            omap *= self.mask            
         
-        # ------------------------------------------------------------
-        # For EACH split:
-        #   1. Convert multifrequency Q/U maps to E/B alms.
-        #   2. Estimate the empirical C_ell covariance and (binned) Cinv.
-        #   3. Build N = Lmix^dagger * Cinv * Lmix -> Build pre-conditioner Mx = (A_pol^T Cinv A_pol)^(-1).
-        #   4. Solve
-        #      Mx * (N) s = Mx * Cinv d
-        #
-        # Different splits contain the same sky signal but independent
-        # noise realizations. The split axis is therefore retained
-        # throughout the reconstruction.
-
-        # ------------------------------------------------------------
-        d_alm_obs = np.zeros(
-            (self.nsplit, self.nfreq, 2, self.ainfo.nelem),
-            dtype=np.complex128,
-        )
-
-        sht.map2alm(omap.astype(np.float64, copy=False),
-                   d_alm_obs,
-                   self.minfo,
-                   self.ainfo,
-                   2,
-        )
-
-        if return_alms:
-            out_dict["data_alms"]=d_alm_obs.copy()
-
-
-        cg_recons = lenshILC_utils.CGComponentReconstructor(
-            bin_size = cg_bin_size,
-            cg_maxiter = cg_maxiter,
-            cg_tol = cg_tol,
-        )
-        cg_recons.set_operator(A, Lx)
-        component_alms = cg_recons.solve_components(d_alm_obs, self.ainfo) #(nsplit, ncomp, 2, nalm)
-        if component_alms.shape[:2] != (self.nsplit, A.shape[1]):
-            raise RuntimeError(
-                "Unexpected reconstructed component shape: "
-                f"{component_alms.shape}."
-            )
+        # We always compute this even though not always needed, but cheap enough.
+        spectra_mf = estimate_spectra(omap, self.minfo, self.ainfo)
         
-        out_dict["component_alms"] = component_alms
-        out_dict["component_names"] = components
-        out_dict["mixing_matrix"] = A
+        if self.pyilcdir:
+            # build NILC B-mode maps.
+            B_maps = np.zeros((self.nsplit, self.nfreq, self.minfo.npix))
+            tmp_alm = np.zeros((2, self.ainfo.nelem), dtype=np.complex128) # E, B.
+            for split in range(self.nsplit):
+                for f, freq_str in enumerate(self.freq_strings):
+                    sht.map2alm(omap[split,f], tmp_alm, self.minfo, self.ainfo, 2)
+                    sht.alm2map(tmp_alm[1], B_maps[split,f], self.ainfo, self.minfo, 0)
 
-        cmb_idx = components.index("cmb")
-        spectra_cg = estimate_spectra_cg(component_alms, self.ainfo, component_idx=cmb_idx) # spectra_cg.shape == (npair, 2, lmax+1)
-        data_cg = get_final_data_vector(spectra_cg, self.bins)  # data_cg.shape == (npair * 2 * nbin)
-
-        out_dict["data"] = data_cg
+            B_maps *= 1e-6 # Convert to K because pyilc assumes that input is in K.
             
+            map_tmpdir = nilc_utils.write_maps(B_maps, output_dir=self.odir)
+            nilc_maps = nilc_utils.get_nilc_maps(
+                self.pyilcdir, map_tmpdir, self.nsplit, self.nside, self.fiducial_beta,
+                self.fiducial_T_dust, self.freq_pivot_dust, self.freqs,
+                self.beam_fwhms, wavelet_type=self.wavelet_type, use_dust_map=self.use_dust_map,
+                use_dbeta_map=self.use_dbeta_map, use_sync_map=self.use_sync_map,
+                use_dbeta_sync_map=self.use_dbeta_sync_map, deproj_dust=self.deproj_dust,
+                deproj_dbeta=self.deproj_dbeta, deproj_sync=self.deproj_sync,
+                deproj_dbeta_sync=self.deproj_dbeta_sync, fiducial_beta_sync=self.fiducial_beta_sync,
+                freq_pivot_sync=self.freq_pivot_sync, output_dir=self.odir, remove_files=True,
+                debug=False)
+
+            spectra_nilc = estimate_spectra_nilc(nilc_maps, self.minfo, self.ainfo)
+
+        if self.coadd_equiv_crosses:
+            spectra_mf = coadd(spectra_mf, self.sels_to_coadd_mf)
+            if self.pyilcdir: 
+                spectra_nilc = coadd(spectra_nilc, self.sels_to_coadd)
+
+        data_mf = get_final_data_vector(spectra_mf, self.bins)
+        if self.pyilcdir:
+            data_nilc = get_final_data_vector(spectra_nilc, self.bins)
+
+        if self.norm_params:
+            data_mf = self.get_norm_data(data_mf)
+            if self.pyilcdir:
+                data_nilc = self.get_norm_data(data_nilc)
+
+        if self.pyilcdir:
+            out = data_nilc
+        else:
+            out = data_mf
+                
+        out_dict['data'] = out
+
+        if also_return_mf_data:
+            out_dict['data_mf'] = data_mf
+
         return out_dict
-
-
+        
     def get_norm_data(self, data):
         '''
         Subtract mean and multiply by inverse sqrt of covariance.
@@ -601,6 +550,7 @@ class CMBSimulator():
         data_norm : (ndata) array
             Normalized data.
         '''
+
         ntri = get_ntri(self.nsplit, self.nfreq)
         tri_indices = get_tri_indices(self.nsplit, self.nfreq)
         data = likelihood_utils.get_diff(
@@ -740,7 +690,7 @@ def get_beta_map(minfo, ainfo, beta0, amp, gamma, seed, ell_0=1, ell_cutoff=1):
 
     return map_beta, beta_cl
 
-def gen_data_fg_template(fg_templates, r_tensor, freq_strings, seed, nsplit,
+def gen_data_fg_template(fg_templates, r_tensor, A_lens, freq_strings, seed, nsplit,
                          cov_noise_ell, cov_scalar_ell, cov_tensor_ell, b_ells,
                          minfo, ainfo, signal_filter=None, no_cmb_ee=False):
     '''
@@ -752,6 +702,8 @@ def gen_data_fg_template(fg_templates, r_tensor, freq_strings, seed, nsplit,
         Dictionary with fstr keys containing foreground B-mode alms.
     r_tensor : float
         Tensor-to-scalar ratio.
+    A_lens : float
+        Amplitude of lensing contribution to BB.
     freq_strings : array-like
         Identifiers, e.g. f090, for the frequency channels of the instrument.
     seed : numpy.random._generator.Generator object or int
@@ -794,7 +746,7 @@ def gen_data_fg_template(fg_templates, r_tensor, freq_strings, seed, nsplit,
 
     # Generate the CMB spectra.
     cov_ell = spectra_utils.get_combined_cmb_spectrum(
-        r_tensor, cov_scalar_ell, cov_tensor_ell)
+        r_tensor, A_lens, cov_scalar_ell, cov_tensor_ell)
     lmax = cov_ell.shape[-1] - 1
     assert ainfo.lmax == lmax
             
@@ -816,7 +768,7 @@ def gen_data_fg_template(fg_templates, r_tensor, freq_strings, seed, nsplit,
     return out_dict
     
 def gen_data(A_d_BB, alpha_d_BB, beta_dust, freq_pivot_dust, temp_dust,
-             r_tensor, freqs, seed, nsplit, cov_noise_ell,
+             r_tensor, A_lens, freqs, seed, nsplit, cov_noise_ell,
              cov_scalar_ell, cov_tensor_ell, b_ells, minfo, ainfo,
              amp_beta_dust=None, gamma_beta_dust=None, A_s_BB=None,
              alpha_s_BB=None, beta_sync=None, freq_pivot_sync=None,
@@ -839,6 +791,8 @@ def gen_data(A_d_BB, alpha_d_BB, beta_dust, freq_pivot_dust, temp_dust,
         Dust temperature for the blackbody part of the model.
     r_tensor : float
         Tensor-to-scalar ratio.
+    A_lens : float
+        Amplitude of lensing contribution to BB.
     freqs : array-like
         Passband centers for the frquency channels of the instrument.
     seed : numpy.random._generator.Generator object or int
@@ -905,7 +859,7 @@ def gen_data(A_d_BB, alpha_d_BB, beta_dust, freq_pivot_dust, temp_dust,
 
     # Generate the CMB spectra.
     cov_ell = spectra_utils.get_combined_cmb_spectrum(
-        r_tensor, cov_scalar_ell, cov_tensor_ell)
+        r_tensor, A_lens, cov_scalar_ell, cov_tensor_ell)
     lmax = cov_ell.shape[-1] - 1
     assert ainfo.lmax == lmax
     
@@ -1344,69 +1298,6 @@ def estimate_spectra_nilc(imap, minfo, ainfo):
         out[idx,0] = ainfo.alm2cl(alm[sidx1,cidx1], alm2=alm[sidx2,cidx2])
 
     return out
-
-def estimate_spectra_cg(component_alms, ainfo, component_idx=0):
-    """
-    Compute cross-split EE and BB spectra for one reconstructed component.
-
-    Parameters
-    ----------
-    component_alms : (nsplit, ncomp, 2, nalm) complex array
-        Reconstructed component E/B alms for all noise splits.
-
-    ainfo : pixell.curvedsky.alm_info
-        Harmonic coefficient layout.
-
-    component_idx : int, optional
-        Index of the reconstructed component whose spectra are estimated.
-        The default is 0, normally corresponding to CMB.
-
-    Returns
-    -------
-    spectra : (npair, 2, lmax + 1) array
-        Cross-split spectra for each unique split pair. The polarization
-        axis contains EE and BB, respectively.
-    """
-    component_alms = np.asarray(component_alms)
-
-    if component_alms.ndim != 4 or component_alms.shape[2] != 2:
-        raise ValueError(
-            "component_alms must have shape "
-            f"(nsplit, ncomp, 2, nalm), got {component_alms.shape}"
-        )
-
-    nsplit = component_alms.shape[0]
-
-    if nsplit < 2:
-        raise ValueError(
-            "At least two independent noise splits are required "
-            "for cross-split spectra."
-        )
-
-    alms = component_alms[:, component_idx]
-    # Shape: (nsplit, 2, nalm)
-
-    split_pairs = [
-        (s1, s2)
-        for s1 in range(nsplit)
-        for s2 in range(s1 + 1, nsplit)
-    ]
-
-    spectra = np.zeros(
-        (len(split_pairs), 2, ainfo.lmax + 1),
-        dtype=float,
-    )
-
-    for idx, (s1, s2) in enumerate(split_pairs):
-        cls = ainfo.alm2cl(
-            alms[s1, :, None, :],
-            alm2=alms[s2, None, :, :],
-        )
-
-        spectra[idx, 0] = cls[0, 0]  # EE
-        spectra[idx, 1] = cls[1, 1]  # BB
-
-    return spectra
 
 def get_coadd_sels(nsplits, ncomps):
     '''
