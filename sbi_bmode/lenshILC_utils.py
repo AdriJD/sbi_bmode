@@ -116,6 +116,7 @@ def build_preconditioner_pol(A, cinv_pol, ainfo): #Build M = (A^TC^-1A)
 # ---------------------------
 
 def build_A(
+    freqs,
     A_d_BB,
     alpha_d_BB,
     beta_dust,
@@ -136,7 +137,7 @@ def build_A(
         Mixing matrix with Shape (n_freq, n_comp).
     """
 
-    freqs_ghz = np.array([25., 27., 39., 93., 145., 225., 280., 350.]) #HardCode frequencies for now.
+    freqs_ghz = np.asarray(freqs)
     beta_d = beta_dust
     beta_s = beta_sync if beta_sync is not None else -3.0
     Td = 19.6
@@ -345,7 +346,7 @@ def f_nu(nu_hz):
     return ((ex - 1.0) / x) ** 2 / ex
 
 def mu_dust(freq_ghz, beta=1.5, Td=19.6):
-    nu = np.asarray(freq_ghz, float) * 1e9
+    nu = np.asarray(freq_ghz, float)
     return (nu ** (beta - 2.0)) * Bnu(nu, Td) * f_nu(nu)
 
 def dust_sed(freq_ghz, beta=1.5, Td=19.6, nu0=353.0):
@@ -372,7 +373,7 @@ def dust_sed_beta1(freq_ghz, beta=1.5, Td=19.6, nu0=353.0):
 # ---------------------------
 
 def omega_sync(freq_ghz, beta=-3.0):
-    nu = np.asarray(freq_ghz, float) * 1e9
+    nu = np.asarray(freq_ghz, float)
     return (nu ** beta) * f_nu(nu)
 
 def sync_sed(freq_ghz, beta=-3.0, nu0=23.0):

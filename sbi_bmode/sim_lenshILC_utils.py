@@ -302,7 +302,7 @@ class CMBSimulator():
         
         # Only adding the BB part because `get_dust_spectra` only produces BB.
         cov_ell = cov_ell.at[:].add(spectra_utils.get_combined_cmb_spectrum(
-            r_tensor, self.cov_scalar_ell, self.cov_tensor_ell)[1,1])
+            r_tensor, 1.0, self.cov_scalar_ell, self.cov_tensor_ell)[1,1])
 
         cov_ell = spectra_utils.apply_beam_to_freq_cov(cov_ell, self.b_ells)
 
@@ -489,6 +489,7 @@ class CMBSimulator():
         # ------------------------------------------------------------
 
         A, components = lenshILC_utils.build_A(
+	    freqs = self.freqs,
             A_d_BB = A_d_BB,
             alpha_d_BB = alpha_d_BB,
             beta_dust = beta_dust,
@@ -794,7 +795,7 @@ def gen_data_fg_template(fg_templates, r_tensor, freq_strings, seed, nsplit,
 
     # Generate the CMB spectra.
     cov_ell = spectra_utils.get_combined_cmb_spectrum(
-        r_tensor, cov_scalar_ell, cov_tensor_ell)
+        r_tensor, 1.0, cov_scalar_ell, cov_tensor_ell)
     lmax = cov_ell.shape[-1] - 1
     assert ainfo.lmax == lmax
             
@@ -905,7 +906,7 @@ def gen_data(A_d_BB, alpha_d_BB, beta_dust, freq_pivot_dust, temp_dust,
 
     # Generate the CMB spectra.
     cov_ell = spectra_utils.get_combined_cmb_spectrum(
-        r_tensor, cov_scalar_ell, cov_tensor_ell)
+        r_tensor, 1.0, cov_scalar_ell, cov_tensor_ell)
     lmax = cov_ell.shape[-1] - 1
     assert ainfo.lmax == lmax
     
