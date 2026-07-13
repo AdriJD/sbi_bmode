@@ -1107,7 +1107,6 @@ def _gen_data_per_freq_gamma(freq, cov_noise_ell, beta_dust, temp_dust, freq_piv
     for sidx in range(nsplit):
         data_alm = signal_alm + alm_utils.rand_alm(
             cov_noise_ell, ainfo, rngs_noise[sidx], dtype=np.complex128)
-        data_alm = signal_alm
         data_alm = np.asarray(data_alm, dtype=np.complex128)
         sht.alm2map(data_alm, out[sidx], ainfo, minfo, 2)
 
