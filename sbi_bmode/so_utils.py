@@ -231,6 +231,7 @@ def load_obs_matrix(freqs: list[str], obsmat_dir: Path, tag="RC1.r01") -> dict:
         The keys are the frequency labels and the values are the
         corresponding observation matrices.
     """
+    obsmat_dir = Path(obsmat_dir)
     obsmats = {}
     for freq in freqs:
         sat = FREQ_INST[freq]

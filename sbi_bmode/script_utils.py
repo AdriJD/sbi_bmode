@@ -4,7 +4,6 @@ import errno
 import numpy as np
 import torch
 from torch.distributions import Normal, HalfNormal
-from mpi4py.util import dtlib
 
 from sbi_bmode import custom_distributions
 
@@ -24,14 +23,18 @@ def parse_config(config):
     fixed_params_dict : dict
         Dictionary with parameters that we keep fixed.
     params_dict : dict
-        Dictionary with parameters that we sample.    
+        Dictionary with parameters that we sample.  
+    obsmat_dict : dict
     '''
 
     data_dict = config['data']
     fixed_params_dict = config['fixed_params']
     params_dict = config['params']    
     
-    return data_dict, fixed_params_dict, params_dict
+    obsmat_dict = config.get('obsmat', {'use_obsmat': False})
+    obsmat_dict.setdefault('use_obsmat', False)
+    
+    return data_dict, fixed_params_dict, params_dict, obsmat_dict
 
 def get_prior(params_dict):
     '''
@@ -166,6 +169,7 @@ def gatherv_array(array_on_rank, comm, root=0):
     array_full : (num_total, ...) array, None
         Full array on root rank, None on others.
     '''
+    from mpi4py.util import dtlib
 
     num_per_rank = comm.allgather(array_on_rank.shape[0])
     num_per_rank = np.asarray(num_per_rank, dtype=np.int64)

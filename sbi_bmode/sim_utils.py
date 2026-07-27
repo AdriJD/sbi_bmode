@@ -118,6 +118,8 @@ class CMBSimulator:
         apply_highpass_filter=True,
         mask_file=None,
         fg_template_files=None,
+        use_obsmat=False,       
+        obsmat_dir=None,        
     ):
         self.lmax = data_dict["lmax"]
         self.lmin = data_dict["lmin"]
@@ -164,6 +166,17 @@ class CMBSimulator:
         assert np.all(np.asarray(self.freqs) > 1e9), "Frequencies have to be in Ghz."
         self.nfreq = len(self.freqs)
 
+        self.use_obsmat = use_obsmat
+        self.obsmat_by_freq = None
+
+        if self.use_obsmat:
+            if obsmat_dir is None:
+                raise ValueError("obsmat_dir must be set when use_obsmat=True.")
+            self.obsmat_by_freq = so_utils.load_obs_matrix(
+                freqs=self.freq_strings,
+                obsmat_dir=obsmat_dir,
+            )
+        
         if fg_template_files is not None:
             self.fg_templates = {}
             for fstr in self.freq_strings:
@@ -521,6 +534,7 @@ class CMBSimulator:
         rho_ds=None,
         also_return_mf_data=False,
         draw_from_fg_template=False,
+        return_maps=False,
     ):
         """
         Draw data realization.
@@ -628,9 +642,16 @@ class CMBSimulator:
             )
         omap = out_dict["data"]
 
+        sky_map = omap.copy() if return_maps else None   # NEW
+
+        if self.use_obsmat:
+            omap = apply_obsmatrix(omap, self.obsmat_by_freq)
+            
         if self.mask is not None:
             omap *= self.mask
 
+        obs_map = omap.copy() if return_maps else None   # NEW
+        
         # We always compute this even though not always needed, but cheap enough.
         spectra_mf = estimate_spectra(omap, self.minfo, self.ainfo)
 
@@ -698,6 +719,10 @@ class CMBSimulator:
         if also_return_mf_data:
             out_dict["data_mf"] = data_mf
 
+        if return_maps:              # NEW
+            out_dict["sky_map"] = sky_map
+            out_dict["obs_map"] = obs_map
+        
         return out_dict
 
     def get_norm_data(self, data):
@@ -1426,57 +1451,66 @@ def _gen_data_per_freq_fg_template(
 
 
 def apply_obsmatrix(
-    maps: dict,
+    imap: np.ndarray,
     obsmats: dict,
-    nside: int,
-) -> dict:
+) -> np.ndarray:
     """
     Apply observation matrices to sky maps.
 
-    The observation matrices are stored in NESTED HEALPix ordering.
-    Input maps are assumed to be in RING ordering and are converted
-    to NESTED ordering before applying the observation matrix. The
-    output maps are converted back to RING ordering.
-
     Parameters
     ----------
-    maps : dict
-        Dictionary mapping frequency labels to input sky maps in RING
-        ordering.
+    imap : ndarray
+        Input maps in RING ordering.
+        Shape:
+            (nsplit, nfreq, npol, npix)
 
     obsmats : dict
         Dictionary mapping frequency labels to ObsMat objects.
 
-    nside : int
-        HEALPix resolution parameter.
-
     Returns
     -------
-    obs_maps : dict
-        Dictionary mapping frequency labels to observed maps in RING
-        ordering.
+    obs_imap : ndarray
+        Observed maps in RING ordering.
+        Shape:
+            (nsplit, nfreq, npol, npix)
     """
-    obs_maps = {}
 
-    for freq, sky_map in maps.items():
-        print(f"[{freq}] applying observation matrix")
+    obs_imap = np.empty_like(imap)
 
-        # RING -> NEST
-        sky_map_nest = hp.reorder(
-            sky_map,
-            r2n=True,
-        )
+    nsplit, nfreq, npol, npix = imap.shape
+    assert npol == 2, "Expected Q, U only input maps."
 
-        # Apply observation matrix (NEST ordering)
-        obs_map_nest = obsmats[freq].apply(sky_map_nest)
+    for i in range(nsplit):
+        for j, freq in enumerate(obsmats.keys()):
 
-        # NEST -> RING
-        obs_maps[freq] = hp.reorder(
-            obs_map_nest,
-            n2r=True,
-        )
+            print(f"[{freq}] applying observation matrix split {i}")
 
-    return obs_maps
+            # Pad to IQU with zero temperature, since the ObsMat expects
+            # a full IQU map (3 * npix), not just Q/U.
+            sky_map_iqu = np.zeros((3, npix), dtype=imap.dtype)
+            sky_map_iqu[1:] = imap[i, j]
+            
+            # RING -> NEST
+            sky_map_nest = hp.reorder(
+                sky_map_iqu,
+                r2n=True,
+            )
+
+            # Apply observation matrix
+            obs_map_nest = obsmats[freq].apply(
+                sky_map_nest
+            )
+
+            # NEST -> RING
+            obs_map_iqu = hp.reorder(
+                obs_map_nest,
+                n2r=True,
+            )
+
+            # Drop the (now-observed) I component, keep Q, U.
+            obs_imap[i, j] = obs_map_iqu[1:]
+            
+    return obs_imap
 
 
 def get_ntri(nsplit, nfreq):
