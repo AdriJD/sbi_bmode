@@ -12,10 +12,11 @@ data:
   cov_tensor_ell: "camb_lens_r1.dat"
   highpass_delta_ell: 5
 
-obsmat:
-  use_obsmat: True
+observation:
+  type: obsmat
   obsmat_dir: "/u/bing/so-data/mss2"
-
+  obsmat_freq: "f090"
+  
 fixed_params:
   freq_pivot_dust: 353.0e+9
   temp_dust: 19.6

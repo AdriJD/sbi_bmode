@@ -25,39 +25,104 @@ true_params = dict(
     r_tensor=0.1, A_lens=1.0, A_d_BB=5.0, alpha_d_BB=-0.2, beta_dust=1.59,
 )
 
-sim = sim_utils.CMBSimulator(
-    specdir, data_dict, fixed_params_dict,
-    use_obsmat=obsmat_dict['use_obsmat'],
-    obsmat_dir=obsmat_dict.get('obsmat_dir'),
+# -------------------------------------------------------
+# Identity observation (no ObsMat)
+# -------------------------------------------------------
+
+identity_observation = {
+    "type": "identity"
+}
+
+sim_identity = sim_utils.CMBSimulator(
+    specdir,
+    data_dict,
+    fixed_params_dict,
+    observation_dict=identity_observation,
 )
 
-sim.use_obsmat = False
-out_no_obsmat = sim.draw_data(**true_params, seed=0, return_maps=True)
-sky_map = out_no_obsmat["obs_map"]
+out_identity = sim_identity.draw_data(
+    **true_params,
+    seed=0,
+    return_maps=True,
+)
 
-sim.use_obsmat = True
-out_obsmat = sim.draw_data(**true_params, seed=0, return_maps=True)
+sky_map = out_identity["obs_map"]
+
+
+# -------------------------------------------------------
+# ObsMat observation
+# Use f090 ObsMat for all frequencies
+# -------------------------------------------------------
+
+obsmat_observation = {
+    "type": "obsmat",
+    "obsmat_dir": "/u/bing/so-data/mss2",
+    "obsmat_freq": "f090",
+}
+
+
+sim_obsmat = sim_utils.CMBSimulator(
+    specdir,
+    data_dict,
+    fixed_params_dict,
+    observation_dict=obsmat_observation,
+)
+
+
+out_obsmat = sim_obsmat.draw_data(
+    **true_params,
+    seed=0,
+    return_maps=True,
+)
+
 obs_map = out_obsmat["obs_map"]
 
-split, pol = 0, 0
-fidx = sim.freq_strings.index('f090')
-fstr = sim.freq_strings[fidx]
+split = 0
+pol = 0
+
+fidx = sim_identity.freq_strings.index('f090')
+fstr = sim_identity.freq_strings[fidx]
+
 
 fig = plt.figure(figsize=(12, 5))
 
-# Use the same color scale on both panels for a fair comparison.
-vmax = np.nanmax(np.abs(sky_map[split, fidx, pol]))
+
+# Same color scale
+vmax = np.nanmax(
+    np.abs(
+        sky_map[split, fidx, pol]
+    )
+)
+
 
 hp.mollview(
-    sky_map[split, fidx, pol], sub=(1, 2, 1),
-    title=f"{fstr} Q — no ObsMat", unit=r"$\mu K$",
-    min=-vmax, max=vmax, fig=fig,
+    sky_map[split, fidx, pol],
+    sub=(1, 2, 1),
+    title=f"{fstr} Q — identity",
+    unit=r"$\mu K$",
+    min=-vmax,
+    max=vmax,
+    fig=fig,
 )
+
+
 hp.mollview(
-    obs_map[split, fidx, pol], sub=(1, 2, 2),
-    title=f"{fstr} Q — with ObsMat", unit=r"$\mu K$",
-    min=-vmax, max=vmax, fig=fig,
+    obs_map[split, fidx, pol],
+    sub=(1, 2, 2),
+    title=f"{fstr} Q — ObsMat ({fstr})",
+    unit=r"$\mu K$",
+    min=-vmax,
+    max=vmax,
+    fig=fig,
 )
+
+
 plt.tight_layout()
-fig.savefig(f"{imgdir}/{fstr}_obsmat_compare_fullsky.png", dpi=150, bbox_inches="tight")
+
+fig.savefig(
+    f"{imgdir}/{fstr}_identity_vs_obsmat.png",
+    dpi=150,
+    bbox_inches="tight",
+)
+
 plt.close(fig)
