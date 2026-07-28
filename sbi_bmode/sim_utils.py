@@ -11,6 +11,7 @@ from optweight import alm_utils, sht, map_utils, mat_utils, alm_c_utils
 import healpy as hp
 from jax import grad
 import jax.numpy as jnp
+import pymaster as nmt
 
 from sbi_bmode import (
     spectra_utils,
@@ -118,8 +119,7 @@ class CMBSimulator:
         apply_highpass_filter=True,
         mask_file=None,
         fg_template_files=None,
-        use_obsmat=False,       
-        obsmat_dir=None,        
+        observation_dict=None
     ):
         self.lmax = data_dict["lmax"]
         self.lmin = data_dict["lmin"]
@@ -166,16 +166,41 @@ class CMBSimulator:
         assert np.all(np.asarray(self.freqs) > 1e9), "Frequencies have to be in Ghz."
         self.nfreq = len(self.freqs)
 
-        self.use_obsmat = use_obsmat
-        self.obsmat_by_freq = None
+        if observation_dict is None:
+            observation_dict = {"type": "identity"}
+        
+        self.observation_type = observation_dict.get("type", "identity")
 
-        if self.use_obsmat:
-            if obsmat_dir is None:
-                raise ValueError("obsmat_dir must be set when use_obsmat=True.")
-            self.obsmat_by_freq = so_utils.load_obs_matrix(
-                freqs=self.freq_strings,
-                obsmat_dir=obsmat_dir,
-            )
+        self.obsmat_by_freq = None
+        
+        if self.observation_type == "obsmat":
+            obsmat_dir = observation_dict.get("obsmat_dir")
+            obsmat_freq = observation_dict.get("obsmat_freq")
+            
+            if obsmat_freq is None:
+                print(
+                    f"[obsmat] Reusing ObsMat {obsmat_freq} "
+                    f"for all frequencies"
+                )
+                
+                loaded = so_utils.load_obs_matrix(
+                    freqs=[obsmat_freq],
+                    obsmat_dir=obsmat_dir,
+                )
+                
+                single_obsmat = loaded[obsmat_freq]
+
+                self.obsmat_by_freq = {
+                    fstr: single_obsmat
+                    for fstr in self.freq_strings
+                }
+                
+            else:
+                self.obsmat_by_freq = so_utils.load_obs_matrix(
+                    freqs=self.freq_strings,
+                    obsmat_dir=obsmat_dir,
+                )
+        
         
         if fg_template_files is not None:
             self.fg_templates = {}
@@ -194,7 +219,27 @@ class CMBSimulator:
             )
         else:
             self.highpass_filter = None
+            
+        self.transfer_ell = None
+        if self.observation_type == "transfer_function":
+            transfer_function_file = observation_dict.get("transfer_function_file")
+        
+            transfer_path = opj(specdir, transfer_function_file)
+            
+            self.transfer_ell = np.load(transfer_path)
 
+            if self.transfer_ell.shape[-1] != self.lmax + 1:
+                raise ValueError(
+                    f"Transfer function shape {self.transfer_ell.shape} "
+                    f"does not match lmax={self.lmax}"
+                )
+            
+            sqrt_transfer = np.sqrt(self.transfer_ell)
+            if self.highpass_filter is not None:
+                self.highpass_filter = self.highpass_filter * sqrt_transfer
+            else:
+                self.highpass_filter = sqrt_transfer
+                
         if pyilcdir:
             self.ncomp = 1
             if self.use_dust_map:
@@ -642,19 +687,23 @@ class CMBSimulator:
             )
         omap = out_dict["data"]
 
-        sky_map = omap.copy() if return_maps else None   # NEW
+        sky_map = omap.copy() if return_maps else None  
 
-        if self.use_obsmat:
-            omap = apply_obsmatrix(omap, self.obsmat_by_freq)
+        omap = self.apply_observation_map(omap)
             
         if self.mask is not None:
             omap *= self.mask
 
-        obs_map = omap.copy() if return_maps else None   # NEW
+        obs_map = omap.copy() if return_maps else None
         
         # We always compute this even though not always needed, but cheap enough.
         spectra_mf = estimate_spectra(omap, self.minfo, self.ainfo)
 
+        if self.observation_type == "transfer_function":
+            spectra_mf *= self.transfer_ell[None, :]
+
+        out_dict["spectra_mf"] = spectra_mf
+        
         if self.pyilcdir:
             # build NILC B-mode maps.
             B_maps = np.zeros((self.nsplit, self.nfreq, self.minfo.npix))
@@ -719,12 +768,37 @@ class CMBSimulator:
         if also_return_mf_data:
             out_dict["data_mf"] = data_mf
 
-        if return_maps:              # NEW
+        if return_maps:             
             out_dict["sky_map"] = sky_map
             out_dict["obs_map"] = obs_map
         
         return out_dict
 
+    def apply_observation_map(self, omap):
+        """
+        Apply map-level observation model.
+
+        ObsMat acts on maps.
+        Transfer functions do not.
+        """
+
+        if self.observation_type == "identity":
+            return omap
+
+        elif self.observation_type == "obsmat":
+            return apply_obsmatrix(
+                omap,
+                self.obsmat_by_freq,
+            )
+
+        elif self.observation_type == "transfer_function":
+            return omap
+
+        else:
+            raise ValueError(
+                f"Unknown observation type {self.observation_type}"
+            )
+        
     def get_norm_data(self, data):
         """
         Subtract mean and multiply by inverse sqrt of covariance.
@@ -1770,3 +1844,146 @@ def get_highpass_filter(lmin, lmax, delta_ell):
     f_ell[: lmin - delta_ell + 1] = 0
 
     return f_ell
+
+def estimate_pseudo_cl(map_a, map_b, ell_bin, nside, mask_dir, apod_scale=2.0, apod_type="C2"):
+    mask = hp.read_map(mask_dir, dtype=np.float32)
+    mask_apod = nmt.mask_apodization(mask, apod_scale, apod_type)
+    
+    fsky_eff = (
+        mask_apod.mean()**2 / np.mean(mask_apod**2)
+    )
+
+    print(f"f_sky before apodization : {mask.mean():.4f}")
+    print(f"Effective f_sky         : {fsky_eff:.4f}")
+    
+    print("Computing pseudo-Cl...")
+    f_a = nmt.NmtField(
+        mask_apod,
+        [map_a[0], map_a[1]],
+    )
+
+    f_b = nmt.NmtField(
+        mask_apod,
+        [map_b[0], map_b[1]],
+    )
+    
+    bins = nmt.NmtBin.from_nside_linear(nside, ell_bin)
+    cl_EE, cl_EB, cl_BE, cl_BB = nmt.compute_full_master(
+        f_a,
+        f_b,
+        bins,
+    )
+    
+    return {
+        "ell": bins.get_effective_ells(),
+        "EE": cl_EE,
+        "EB": cl_EB,
+        "BE": cl_BE,
+        "BB": cl_BB,
+    }
+    
+def estimate_transfer_function(
+    maps_sky,
+    maps_obs,
+    ell_bin,
+    nside,
+    lmax,
+    mask_dir,
+    apod_scale=2.0,
+    apod_type="C2",
+    return_diagnostics=False,
+):
+    """
+    Estimate the transfer function
+
+        T_ell = <C_ell^obs> / <C_ell^sky>
+
+    where the averages are taken over Monte Carlo simulations.
+
+    Parameters
+    ----------
+    return_diagnostics : bool, optional
+        If set, also return per-bin means/errors for both the BB spectra
+        and the transfer function ratio itself, for plotting.
+
+    Returns
+    -------
+    transfer_ell : (lmax + 1,) array
+    diagnostics : dict, optional
+        Only if return_diagnostics=True. Keys:
+            ell : (nbins,) bandpower centers
+            bb_sky_mean, bb_obs_mean : (nbins,) MC mean spectra
+            bb_sky_err, bb_obs_err : (nbins,) standard error on the mean
+            transfer_bins_mean : (nbins,) MC mean of per-sim ratio
+            transfer_bins_err : (nbins,) standard error on that mean
+            transfer_bins_std : (nbins,) sim-to-sim std (not divided by
+                sqrt(nsims)) -- use this if you want to show the spread
+                of individual draws rather than uncertainty on the mean.
+    """
+
+    nsims = maps_sky.shape[0]
+
+    bb_sky_all = []
+    bb_obs_all = []
+    ratio_all = []
+    ells_eff = None
+
+    for i in range(nsims):
+        print(f"[transfer function] sim {i + 1}/{nsims}")
+
+        cl_sky = estimate_pseudo_cl(
+            maps_sky[i], maps_sky[i], ell_bin, nside, mask_dir,
+            apod_scale=apod_scale, apod_type=apod_type,
+        )
+        cl_obs = estimate_pseudo_cl(
+            maps_obs[i], maps_obs[i], ell_bin, nside, mask_dir,
+            apod_scale=apod_scale, apod_type=apod_type,
+        )
+
+        if ells_eff is None:
+            ells_eff = cl_sky["ell"]
+
+        bb_sky_all.append(cl_sky["BB"])
+        bb_obs_all.append(cl_obs["BB"])
+
+        # Per-sim ratio, computed here rather than from the MC-averaged
+        # spectra, so we can track how the ratio itself fluctuates.
+        ratio_i = np.zeros_like(cl_sky["BB"])
+        good_i = np.abs(cl_sky["BB"]) > 1e-30
+        ratio_i[good_i] = cl_obs["BB"][good_i] / cl_sky["BB"][good_i]
+        ratio_all.append(ratio_i)
+
+    bb_sky_all = np.asarray(bb_sky_all)   # (nsims, nbins)
+    bb_obs_all = np.asarray(bb_obs_all)
+    ratio_all = np.asarray(ratio_all)     # (nsims, nbins)
+
+    # Monte Carlo averages of the spectra (used for the central T_ell).
+    mean_bb_sky = np.mean(bb_sky_all, axis=0)
+    mean_bb_obs = np.mean(bb_obs_all, axis=0)
+
+    transfer_bins = np.zeros_like(mean_bb_sky)
+    good = np.abs(mean_bb_sky) > 1e-30
+    transfer_bins[good] = mean_bb_obs[good] / mean_bb_sky[good]
+
+    # Interpolate the central transfer function onto every ell.
+    ells_full = np.arange(lmax + 1)
+    transfer_ell = np.interp(
+        ells_full, ells_eff, transfer_bins,
+        left=transfer_bins[0], right=transfer_bins[-1],
+    )
+
+    if not return_diagnostics:
+        return transfer_ell
+
+    diagnostics = {
+        "ell": ells_eff,
+        "bb_sky_mean": mean_bb_sky,
+        "bb_obs_mean": mean_bb_obs,
+        "bb_sky_err": np.std(bb_sky_all, axis=0) / np.sqrt(nsims),
+        "bb_obs_err": np.std(bb_obs_all, axis=0) / np.sqrt(nsims),
+        "transfer_bins_mean": np.mean(ratio_all, axis=0),
+        "transfer_bins_std": np.std(ratio_all, axis=0),
+        "transfer_bins_err": np.std(ratio_all, axis=0) / np.sqrt(nsims),
+    }
+
+    return transfer_ell, diagnostics

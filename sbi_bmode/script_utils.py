@@ -31,10 +31,28 @@ def parse_config(config):
     fixed_params_dict = config['fixed_params']
     params_dict = config['params']    
     
-    obsmat_dict = config.get('obsmat', {'use_obsmat': False})
-    obsmat_dict.setdefault('use_obsmat', False)
+    observation_dict = config.get(
+        'observation',
+        {'type': 'identity'}
+    )
     
-    return data_dict, fixed_params_dict, params_dict, obsmat_dict
+    observation_type = observation_dict.get('type', 'identity')
+    
+    valid_types = [
+        'identity',
+        'obsmat',
+        'transfer_function'
+    ]
+    
+    if observation_type not in valid_types:
+        raise ValueError(
+            f"Unknown observation type '{observation_type}'. "
+            f"Choose from {valid_types}"
+        )
+    
+    transfer_function_dict = config.get('transfer_function', None)
+
+    return data_dict, fixed_params_dict, params_dict, observation_dict, transfer_function_dict
 
 def get_prior(params_dict):
     '''
