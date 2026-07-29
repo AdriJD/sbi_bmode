@@ -235,11 +235,22 @@ class CMBSimulator:
                 )
             
             sqrt_transfer = np.sqrt(self.transfer_ell)
+            # Replace NaN, +inf, -inf with 0
+            sqrt_transfer = np.nan_to_num(
+                sqrt_transfer,
+                nan=0.0,
+                posinf=0.0,
+                neginf=0.0,
+            )
+
+            print("SQRT transfer", sqrt_transfer)
+
             if self.highpass_filter is not None:
-                self.highpass_filter = self.highpass_filter * sqrt_transfer
+                self.highpass_filter *= sqrt_transfer
+                print("High pass filter:", self.highpass_filter)
             else:
                 self.highpass_filter = sqrt_transfer
-                
+                            
         if pyilcdir:
             self.ncomp = 1
             if self.use_dust_map:
@@ -698,11 +709,6 @@ class CMBSimulator:
         
         # We always compute this even though not always needed, but cheap enough.
         spectra_mf = estimate_spectra(omap, self.minfo, self.ainfo)
-
-        if self.observation_type == "transfer_function":
-            spectra_mf *= self.transfer_ell[None, :]
-
-        out_dict["spectra_mf"] = spectra_mf
         
         if self.pyilcdir:
             # build NILC B-mode maps.
