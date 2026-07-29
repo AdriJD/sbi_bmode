@@ -3,7 +3,7 @@ from sbi_bmode import sim_utils, script_utils
 import yaml
 import matplotlib.pyplot as plt
 
-with open('/u/bing/sbi_bmode/scripts/configs/config_transfer_1.yaml') as f:
+with open('/u/bing/sbi_bmode/scripts/configs/config_transfer_2.yaml') as f:
     config = yaml.safe_load(f)
 
 data_dict, fixed_params_dict, params_dict, observation_dict, transfer_dict = \
@@ -24,6 +24,7 @@ sim_sky = sim_utils.CMBSimulator(
     data_dict,
     fixed_params_dict,
     observation_dict={'type': 'identity'},
+    apply_highpass_filter=False
 )
 
 sim_obs = sim_utils.CMBSimulator(
@@ -31,6 +32,7 @@ sim_obs = sim_utils.CMBSimulator(
     data_dict,
     fixed_params_dict,
     observation_dict=observation_dict,
+    apply_highpass_filter=False
 )
 
 fidx = sim_sky.freq_strings.index(observation_dict['obsmat_freq'])
@@ -99,7 +101,8 @@ plt.plot(
 
 plt.axhline(1.0, color="k", ls="--", alpha=0.5)
 
-plt.xlim(0, 200)
+plt.xlim(1, 200)
+plt.ylim(-0.05, 1)
 
 plt.xlabel(r"$\ell$")
 plt.ylabel(r"$T_\ell$")
@@ -108,7 +111,7 @@ plt.grid(alpha=0.3)
 plt.legend()
 
 plt.tight_layout()
-plt.savefig(f"{specdir}/transfer_function_binned.png", dpi=200)
+plt.savefig(f"{figdir}/transfer_function_binned.png", dpi=200)
 
 
 
@@ -166,7 +169,7 @@ plt.plot(
 )
 
 plt.xlim(0, 200)
-
+plt.ylim(-0.05, 1)
 plt.xlabel(r"$\ell$")
 plt.ylabel(r"$T_\ell$")
 plt.title("Interpolated Transfer Function")
