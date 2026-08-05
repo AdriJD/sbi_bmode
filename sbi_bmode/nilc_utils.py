@@ -126,6 +126,7 @@ def get_nilc_maps(pyilc_path, map_tmpdir, nsplit, nside, fiducial_beta, fiducial
         pyilc_input_params = {}
         pyilc_input_params['output_dir'] = nilc_tmpdir + '/'
         pyilc_input_params['output_prefix'] = f""
+        pyilc_input_params['work_in_healpix'] = 'True' 
         pyilc_input_params['save_weights'] = "no"
         pyilc_input_params['ELLMAX'] = 3*nside-2
         pyilc_input_params['wavelet_type'] = wavelet_type        
@@ -187,7 +188,7 @@ def get_nilc_maps(pyilc_path, map_tmpdir, nsplit, nside, fiducial_beta, fiducial
         cmb_param_dict['N_deproj'] = len(ilc_deproj_comps)
         cmb_param_dict['ILC_deproj_comps'] = ilc_deproj_comps
         if len(ilc_deproj_comps) > 0:
-            cmb_oname += f'_deproject_{'_'.join(ilc_deproj_comps)}'
+            cmb_oname += f"_deproject_{'_'.join(ilc_deproj_comps)}"
             
         comps = ['CMB']        
         all_param_dicts = [cmb_param_dict]
@@ -208,7 +209,7 @@ def get_nilc_maps(pyilc_path, map_tmpdir, nsplit, nside, fiducial_beta, fiducial
             dust_param_dict['ILC_deproj_comps'] = ilc_deproj_comps_dust
             dust_param_dict['N_deproj'] = len(ilc_deproj_comps_dust)
             all_param_dicts.append(dust_param_dict)
-            dust_oname += f'_deproject_{'_'.join(ilc_deproj_comps_dust)}'
+            dust_oname += f"_deproject_{'_'.join(ilc_deproj_comps_dust)}"
             
         if use_dbeta_map:
 
@@ -227,7 +228,7 @@ def get_nilc_maps(pyilc_path, map_tmpdir, nsplit, nside, fiducial_beta, fiducial
             dbeta_param_dict['ILC_deproj_comps'] = ilc_deproj_comps_dbeta
             dbeta_param_dict['N_deproj'] = len(ilc_deproj_comps_dbeta)
             all_param_dicts.append(dbeta_param_dict)
-            dbeta_oname += f'_deproject_{'_'.join(ilc_deproj_comps_dbeta)}'
+            dbeta_oname += f"_deproject_{'_'.join(ilc_deproj_comps_dbeta)}"
 
         if use_sync_map:
 
@@ -246,7 +247,7 @@ def get_nilc_maps(pyilc_path, map_tmpdir, nsplit, nside, fiducial_beta, fiducial
             sync_param_dict['ILC_deproj_comps'] = ilc_deproj_comps_sync
             sync_param_dict['N_deproj'] = len(ilc_deproj_comps_sync)
             all_param_dicts.append(sync_param_dict)
-            sync_oname += f'_deproject_{'_'.join(ilc_deproj_comps_sync)}'
+            sync_oname += f"_deproject_{'_'.join(ilc_deproj_comps_sync)}"
  
         if use_dbeta_sync_map:
 
@@ -265,7 +266,7 @@ def get_nilc_maps(pyilc_path, map_tmpdir, nsplit, nside, fiducial_beta, fiducial
             dbeta_sync_param_dict['ILC_deproj_comps'] = ilc_deproj_comps_dbeta_sync
             dbeta_sync_param_dict['N_deproj'] = len(ilc_deproj_comps_dbeta_sync)
             all_param_dicts.append(dbeta_sync_param_dict)           
-            dbeta_sync_oname += f'_deproject_{'_'.join(ilc_deproj_comps_dbeta_sync)}'
+            dbeta_sync_oname += f"_deproject_{'_'.join(ilc_deproj_comps_dbeta_sync)}"
                                     
         # Dump CMB and dust yaml files.
         all_yaml_files = [f'{nilc_tmpdir}/split{split}_{comp}_preserved.yml' for comp in comps]
@@ -278,8 +279,23 @@ def get_nilc_maps(pyilc_path, map_tmpdir, nsplit, nside, fiducial_beta, fiducial
         stdout = open(os.path.join(nilc_tmpdir, 'stdout.txt'), "w") if not debug else None
 
         for c, comp in enumerate(comps):
-            subprocess.run([f"python {pyilc_path}/pyilc/main.py {all_yaml_files[c]}"],
-                           shell=True, env=env, stdout=stdout, stderr=subprocess.STDOUT)
+            result = subprocess.run(
+                ["python", "-m", "pyilc.main", all_yaml_files[c]],
+                shell=False,
+                cwd=pyilc_path,
+                env=env,
+                stdout=stdout,
+                stderr=subprocess.STDOUT,
+            )
+            if result.returncode != 0:
+                if stdout is not None:
+                    stdout.close()
+                log_path = os.path.join(nilc_tmpdir, 'stdout.txt')
+                log_contents = open(log_path).read() if os.path.exists(log_path) else "(no log captured)"
+                raise RuntimeError(
+                    f"pyilc failed for component '{comp}' (split {split}), "
+                    f"returncode={result.returncode}:\n{log_contents}"
+                )
         if stdout is not None:
             stdout.close()
             
