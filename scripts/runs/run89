@@ -1,0 +1,47 @@
+#!/bin/bash
+#SBATCH --job-name=run89_obsmat
+#SBATCH --nodes=1
+#SBATCH --ntasks-per-node=128
+#SBATCH --cpus-per-task=1
+#SBATCH --ntasks-per-core=1
+#SBATCH --time=03:00:00
+#SBATCH --mail-type=ALL
+#SBATCH --mail-user=yenbinhpy308@gmail.com
+
+source /mpcdf/modules/init/sh
+
+module purge
+module load gcc/16
+module load impi/2021.18
+
+export LD_LIBRARY_PATH="$I_MPI_ROOT/lib:$I_MPI_ROOT/opt/mpi/libfabric/lib:$HOME/local/lib:$LD_LIBRARY_PATH"
+export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
+
+source /u/bing/sbi_bmode/.venv/bin/activate
+
+TAG=run89
+ANADIR=/u/bing/sbi_bmode/scripts
+ODIR=/ptmp/bing/2026_sbi_bmode/${TAG}
+SPECDIR=/u/bing/sbi_bmode/data
+CONFIGDIR=/u/bing/sbi_bmode/scripts/configs
+PYILCDIR=/u/bing/local/pyilc
+
+mkdir -p ${ODIR}
+
+CONFIG=${CONFIGDIR}/config_run_obsmat01.yaml
+
+export JAX_ENABLE_X64=True
+export JAX_DEBUG_NANS=True
+export JAX_PLATFORMS=cpu 
+
+NROUNDS=1
+NTRAIN_PER_ROUND=640
+FID_BETA=1.5
+FID_T=19.6
+FID_BETA_SYNC=-3.0
+NTEST=384
+SEED=0
+
+srun -u --cpu-bind=cores -c $SLURM_CPUS_PER_TASK python ${ANADIR}/run_sbi_basic.py --odir ${ODIR} --config ${CONFIG} --specdir ${SPECDIR} --n_train ${NTRAIN_PER_ROUND} --n_samples 50000 --n_rounds ${NROUNDS} --pyilcdir ${PYILCDIR} --fiducial_beta ${FID_BETA} --fiducial_T_dust ${FID_T} --fiducial_beta_sync ${FID_BETA_SYNC} --deproj_dust --deproj_dbeta --deproj_sync --deproj_dbeta_sync --use_dbeta_map --use_sync_map --use_dbeta_sync_map --seed ${SEED} --n_test ${NTEST} --no-highpass-filter
+
+cp ./slurm-${SLURM_JOB_ID}.out ${ODIR}/

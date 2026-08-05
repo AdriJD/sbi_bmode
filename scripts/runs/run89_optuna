@@ -1,0 +1,37 @@
+#!/bin/bash
+#SBATCH --job-name=run89_optuna
+#SBATCH --nodes=1
+#SBATCH --ntasks-per-node=128
+#SBATCH --cpus-per-task=1
+#SBATCH --ntasks-per-core=1
+#SBATCH --time=00:30:00
+#SBATCH --mail-type=ALL
+#SBATCH --mail-user=yenbinhpy308@gmail.com
+
+source /mpcdf/modules/init/sh
+
+module purge
+module load gcc/16
+module load impi/2021.18
+
+export LD_LIBRARY_PATH="$I_MPI_ROOT/lib:$I_MPI_ROOT/opt/mpi/libfabric/lib:$HOME/local/lib:$LD_LIBRARY_PATH"
+export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
+
+source /u/bing/sbi_bmode/.venv/bin/activate
+
+TAG=run89_optuna_a
+ANADIR=/u/bing/sbi_bmode/scripts
+ODIR=/ptmp/bing/2026_sbi_bmode/${TAG}
+IDIR=/ptmp/bing/2026_sbi_bmode/run89_a
+
+CONFIG=${IDIR}/config.yaml
+PARAMS=${IDIR}/param_draws_round_000.npy
+DATA=${IDIR}/data_draws_round_000.npy
+DATA_OBS=${IDIR}/data_norm.npy
+JOURNAL=${ODIR}/optuna_study.journal
+
+export JAX_ENABLE_X64=True
+export JAX_DEBUG_NANS=True
+export JAX_PLATFORMS=cpu 
+
+srun -u --cpu-bind=cores -c $SLURM_CPUS_PER_TASK python ${ANADIR}/check_estimators.py --params ${PARAMS} --data ${DATA} --data-obs ${DATA_OBS} --odir ${ODIR} --config ${CONFIG} --journal ${JOURNAL}

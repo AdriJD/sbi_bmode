@@ -161,7 +161,8 @@ run86_beta4 : like run86 but with fiducial_beta_sync=-4
 
 run87 NILC cmb + d + s, config22, 51840 sims, beta_s_pyilc = -1
 run88 NILC cmb + d + s, deproj but no maps, config22, 51840 sims, beta_s_pyilc = -1
-
+run89 NILC cmb + d + s + dbd + dbs config_run_obsmat01, 640 sims, observation: transfer fucntion
+run89b NILC cmb + d + s + dbd + dbs config_run_obsmat01, 51840 sims, observation: transfer fucntion
 
 run52bt	test set with config21 otherwise same as 52b
 run52bt2 rerun of run52bt to test new code
@@ -181,6 +182,8 @@ run71t	test set with config24 (only varying gamma params) otherwise same as 71
 
 run87t	test set with config24 (only varying gamma params) otherwise same as 87
 run88t	test set with config24 (only varying gamma params) otherwise same as 88
+run89t  test set with config_run_obsmat01 (observation: transfer function)
+run89t_obsmat test set with config_run_obsmat02 (observation: obsmat)
 
 run65xtra extra test data for run65, used for e-moped compression in TARP test
 run65cov extra test data with fixed parameters rougly at PySM values.
@@ -326,7 +329,7 @@ run86_beta4_optuna : optuna for run86_beta4
 
 run87_optuna : optuna for run87
 run88_optuna : optuna for run88
-
+run89_optuna : optuna for run89
 
 sample52bt : sample the 52bt test set
 sample56t : sample the 56t test set
