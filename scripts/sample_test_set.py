@@ -77,7 +77,7 @@ def plot_posterior(opath, samples, config, param_truths, cosmo_only=False):
                             'gamma_beta_sync' : r'$\gamma_{\mathrm{s}}$',
                             'rho_ds' : r'$\rho_{\mathrm{ds}}$'}
         
-    data_dict, fixed_params_dict, params_dict = script_utils.parse_config(config)
+    data_dict, fixed_params_dict, params_dict, observation_dict, transfer_dict = script_utils.parse_config(config)
     prior, param_names = script_utils.get_prior(params_dict)
 
     if cosmo_only:

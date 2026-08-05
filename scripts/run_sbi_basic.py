@@ -15,7 +15,9 @@ from sbi.utils.user_input_checks import (
     MultipleIndependent
 )
 from sbi.neural_nets.embedding_nets import FCEmbedding
-from sbi.neural_nets import posterior_nn, flowmatching_nn
+from sbi.neural_nets import posterior_nn
+# from sbi.neural_nets import flowmatching_nn
+from sbi.neural_nets import posterior_flow_nn
 
 from sbi_bmode import (
     sim_utils, script_utils, compress_utils, custom_distributions)
@@ -409,7 +411,7 @@ def main(odir, config, specdir, seed, n_train, n_samples, n_rounds, pyilcdir, us
     rng_sbi, rng_sims = [np.random.default_rng(s) for s in seed_per_rank.spawn(2)]
     seed_all_backends(int(rng_sbi.integers(2 ** 32 - 1)))
 
-    data_dict, fixed_params_dict, params_dict = script_utils.parse_config(config)
+    data_dict, fixed_params_dict, params_dict, observation_dict, transfer_dict = script_utils.parse_config(config)
     prior, param_names = script_utils.get_prior(params_dict)    
     prior = MultipleIndependent(prior)
     prior, num_parameters, prior_returns_numpy = process_prior(prior)
@@ -539,7 +541,12 @@ def main(odir, config, specdir, seed, n_train, n_samples, n_rounds, pyilcdir, us
                                         num_blocks=num_blocks)
         inference = SNPE(prior=prior, density_estimator=neural_posterior)
     elif fmpe:
-        net_builder = flowmatching_nn(
+        # net_builder = flowmatching_nn(
+        #     model="resnet",
+        #     num_blocks=3,
+        #     hidden_features=24
+        # )
+        net_builder = posterior_flow_nn(
             model="resnet",
             num_blocks=3,
             hidden_features=24

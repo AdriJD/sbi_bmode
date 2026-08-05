@@ -17,7 +17,7 @@ from sbi.utils.user_input_checks import (
     MultipleIndependent
 )
 from sbi.neural_nets.embedding_nets import FCEmbedding
-from sbi.neural_nets import posterior_nn, flowmatching_nn
+from sbi.neural_nets import posterior_nn
 from getdist import plots as getdist_plots
 from getdist import MCSamples
 import optuna
@@ -130,7 +130,7 @@ def plot_posterior(opath, samples, prior_samples, config, cosmo_only=False):
                             'gamma_beta_sync' : r'$\gamma_{\mathrm{s}}$',
                             'rho_ds' : r'$\rho_{\mathrm{ds}}$'}
 
-    data_dict, fixed_params_dict, params_dict = script_utils.parse_config(config)
+    data_dict, fixed_params_dict, params_dict, observation_dict, transfer_dict = script_utils.parse_config(config)
     prior, param_names = script_utils.get_prior(params_dict)
     
     if cosmo_only:
@@ -311,7 +311,7 @@ def main(path_params, path_data, path_data_obs, odir, imgdir, config, n_samples,
         x_obs = torch.as_tensor(np.einsum('ij, j -> i', mat_compress, x_obs.numpy()), dtype=torch.float32)
         np.save(opj(odir, f'mat_compress.npy'), mat_compress)
         
-    data_dict, fixed_params_dict, params_dict = script_utils.parse_config(config)
+    data_dict, fixed_params_dict, params_dict, observation_dict, transfer_dict = script_utils.parse_config(config)
     prior_list, param_names = script_utils.get_prior(params_dict)
 
     if cosmo_only:
