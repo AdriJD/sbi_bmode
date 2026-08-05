@@ -208,7 +208,12 @@ def get_sat_noise_old(
     return n_ell
 
 
-def load_obs_matrix(freqs: list[str], obsmat_dir: Path, tag="RC1.r01") -> dict:
+def load_obs_matrix(
+    freqs: list[str], 
+    obsmat_dir: Path, 
+    tag="RC1.r01",
+    release="mss2",
+    ) -> dict:
     """
     Load observation matrices for multiple frequency bands.
 
@@ -235,7 +240,55 @@ def load_obs_matrix(freqs: list[str], obsmat_dir: Path, tag="RC1.r01") -> dict:
     obsmats = {}
     for freq in freqs:
         sat = FREQ_INST[freq]
-        obsmat_file = obsmat_dir / OBSMAT_TEMPLATE.format(tag=tag, sat=sat, flabel=freq)
-        print(f"[{freq} GHz] loading obsmat: {obsmat_file.name}")
-        obsmats[freq] = ObsMat(obsmat_file)
+        
+        if release == "mss2":
+            obsmat_file = obsmat_dir / OBSMAT_TEMPLATE.format(tag=tag, sat=sat, flabel=freq)
+            print(f"[{freq} GHz] loading obsmat: {obsmat_file.name}")
+            obsmats[freq] = ObsMat(obsmat_file)
+        
+        elif release == "mss3":
+            north_file = (
+                obsmat_dir /
+                f"obsmat_{sat}_{freq}_01_QU.north.npz"
+            )
+
+            south_file = (
+                obsmat_dir /
+                f"obsmat_{sat}_{freq}_01_QU.south.npz"
+            )
+
+            print(f"[{freq}] loading MSS3 north:")
+            print(f"        {north_file.name}")
+
+            print(f"[{freq}] loading MSS3 south:")
+            print(f"        {south_file.name}")
+
+
+            north = ObsMat(north_file)
+            south = ObsMat(south_file)
+
+            obsmats[freq] = CombinedObsMat(
+                north,
+                south,
+            )
     return obsmats
+
+class CombinedObsMat:
+    """
+    Combined two ObsMat objects (e.g. MSS3 south + north)
+    
+    The combined ObsMat applied both matrices and concatenates the outputs.
+    """
+    def __init__(self, north, south):
+        self.north = north
+        self.south = south
+    
+    def apply(self, x):
+        """
+        Apply north and south observation matrices
+        """
+        y_north = self.north.apply(x)
+        y_south = self.south.apply(x)
+        
+        return y_north + y_south
+    
