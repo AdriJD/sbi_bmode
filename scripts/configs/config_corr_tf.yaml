@@ -14,7 +14,7 @@ data:
 
 observation:
   type: transfer_function
-  transfer_function_file: "/u/bing/sbi_bmode/data/transfer_function_2.npy"
+  transfer_function_file: "/u/bing/sbi_bmode/data/transfer_function_90_no_highpass.npy"
 
 transfer_function:
   mask_file: "/u/bing/sbi_bmode/data/full_mask_nside128.fits"
