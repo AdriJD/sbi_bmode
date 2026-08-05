@@ -1,0 +1,44 @@
+#!/bin/bash
+#SBATCH --job-name=sample89t_a
+#SBATCH --nodes=1
+#SBATCH --ntasks-per-node=72
+#SBATCH --cpus-per-task=1
+#SBATCH --ntasks-per-core=1
+#SBATCH --time=00:20:00
+
+source /mpcdf/modules/init/sh
+
+module purge
+module load gcc/16
+module load impi/2021.18
+
+export LD_LIBRARY_PATH="$I_MPI_ROOT/lib:$I_MPI_ROOT/opt/mpi/libfabric/lib:$HOME/local/lib:$LD_LIBRARY_PATH"
+export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
+
+source /u/bing/sbi_bmode/.venv/bin/activate
+
+TAG=sample89t_a
+ANADIR=/u/bing/sbi_bmode/scripts
+ODIR=/ptmp/bing/2026_sbi_bmode/${TAG}
+
+# Location of posterior.
+IDIR_OPTUNA=/ptmp/bing/2026_sbi_bmode/run89_optuna_a/trial_0111
+# Location of config.
+RUNDIR=/ptmp/bing/2026_sbi_bmode/run89_a
+# Location of test sets.
+TESTDIR=/ptmp/bing/2026_sbi_bmode/run89t
+
+CONFIG=${RUNDIR}/config.yaml
+POSTERIOR=${IDIR_OPTUNA}/posterior.pkl
+SEED=0
+TEST_DATA=${TESTDIR}/data_draws_test.npy
+TEST_PARAMS=${TESTDIR}/param_draws_test.npy
+NSAMP=10000
+
+export JAX_ENABLE_X64=True
+export JAX_DEBUG_NANS=True
+export JAX_PLATFORMS=cpu 
+
+srun -u --cpu-bind=cores -c $SLURM_CPUS_PER_TASK python ${ANADIR}/sample_test_set.py --odir ${ODIR} --config ${CONFIG} --posterior ${POSTERIOR} --test-params ${TEST_PARAMS} --test-data ${TEST_DATA} --nsamp ${NSAMP} --seed ${SEED}
+
+cp ./slurm-${SLURM_JOB_ID}.out ${ODIR}/
