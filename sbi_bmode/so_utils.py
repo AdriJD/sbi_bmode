@@ -1,7 +1,9 @@
-import numpy as np
-from scipy.sparse import load_npz
-from toast.ops import ObsMat
 from pathlib import Path
+
+import numpy as np
+import scipy
+from mpi4py import MPI
+from toast.ops import ObsMat
 
 # In arcmin.
 sat_beam_fwhms = {
@@ -10,7 +12,7 @@ sat_beam_fwhms = {
     "f090": 30.0,
     "f150": 17.0,
     "f230": 11.0,
-    f"f290": 9.0,
+    "f290": 9.0,
 }
 
 # In Hz.
@@ -207,7 +209,116 @@ def get_sat_noise_old(
 
     return n_ell
 
+def load_obs_matrix_shared(filename, comm):
+    node_comm = comm.Split_type(MPI.COMM_TYPE_SHARED)
+    node_rank = node_comm.Get_rank()
 
+    if node_rank == 0:
+        mat = scipy.sparse.load_npz(filename)
+        if not scipy.sparse.isspmatrix_csr(mat):
+            mat = mat.tocsr()
+
+        data, indices, indptr = mat.data, mat.indices, mat.indptr
+        shape = mat.shape
+        data_dtype_str = data.dtype.str
+        indices_dtype_str = indices.dtype.str
+        indptr_dtype_str = indptr.dtype.str
+        data_size, indices_size, indptr_size = data.size, indices.size, indptr.size
+    else:
+        data = indices = indptr = None
+        shape = data_dtype_str = indices_dtype_str = indptr_dtype_str = None
+        data_size = indices_size = indptr_size = None
+
+    shape = node_comm.bcast(shape, root=0)
+    data_dtype_str = node_comm.bcast(data_dtype_str, root=0)
+    indices_dtype_str = node_comm.bcast(indices_dtype_str, root=0)
+    indptr_dtype_str = node_comm.bcast(indptr_dtype_str, root=0)
+    data_size = node_comm.bcast(data_size, root=0)
+    indices_size = node_comm.bcast(indices_size, root=0)
+    indptr_size = node_comm.bcast(indptr_size, root=0)
+
+    data_dtype = np.dtype(data_dtype_str)
+    indices_dtype = np.dtype(indices_dtype_str)
+    indptr_dtype = np.dtype(indptr_dtype_str)
+
+    def alloc_and_attach(size, dtype):
+        nbytes = size * dtype.itemsize if node_rank == 0 else 0
+        win = MPI.Win.Allocate_shared(nbytes, dtype.itemsize, comm=node_comm)
+        # Explicitly query rank 0's buffer -- this is what makes it "shared"
+        buf, itemsize = win.Shared_query(0)
+        arr = np.ndarray(buffer=buf, dtype=dtype, shape=(size,))
+        return win, arr
+
+    data_win, data_shared = alloc_and_attach(data_size, data_dtype)
+    indices_win, indices_shared = alloc_and_attach(indices_size, indices_dtype)
+    indptr_win, indptr_shared = alloc_and_attach(indptr_size, indptr_dtype)
+
+    if node_rank == 0:
+        data_shared[:] = data
+        indices_shared[:] = indices
+        indptr_shared[:] = indptr
+
+    node_comm.Barrier()
+
+    matrix = scipy.sparse.csr_matrix(
+        (data_shared, indices_shared, indptr_shared),
+        shape=shape,
+        copy=False,
+    )
+    matrix._mpi_resources = (data_win, indices_win, indptr_win, node_comm)
+
+    return matrix
+
+class CombinedObsMat:
+    """
+    Combined two ObsMat objects (e.g. MSS3 south + north)
+    
+    The combined ObsMat applied both matrices and adds the outputs.
+    """
+    def __init__(self, north, south):
+        self.north = north
+        self.south = south
+    
+    def apply(self, x):
+        """
+        Apply north and south observation matrices
+        """
+        y_north = self.north.apply(x)
+        y_south = self.south.apply(x)
+        
+        return y_north + y_south
+
+
+class SharedObsMat:
+    """
+    Observation matrix backed by an MPI-shared-memory CSR array.
+
+    Same `.apply()` interface as toast.ops.ObsMat, but the underlying
+    sparse matrix is loaded once per compute node (by the node's rank 0)
+    and shared with every other rank on that node, instead of being
+    loaded independently by every single rank.
+    """
+
+    def __init__(self, filename, comm):
+        self.filename = str(filename)
+        self.matrix = load_obs_matrix_shared(self.filename, comm)
+        self.nnz = self.matrix.nnz
+        self.nrow, self.ncol = self.matrix.shape
+
+    def apply(self, map_in):
+        nmap, npix = np.atleast_2d(map_in).shape
+        npixtot = np.prod(map_in.shape)
+        if npixtot != self.ncol:
+            msg = (
+                f"Map is incompatible with the observation matrix. "
+                f"shape(matrix) = {self.matrix.shape}, shape(map) = {map_in.shape}"
+            )
+            raise RuntimeError(msg)
+        map_out = self.matrix.dot(map_in.ravel())
+        if nmap != 1:
+            map_out = map_out.reshape([nmap, -1])
+        return map_out
+    
 def load_obs_matrix(
     freqs: list[str], 
     obsmat_dir: Path, 
@@ -273,22 +384,56 @@ def load_obs_matrix(
             )
     return obsmats
 
-class CombinedObsMat:
+def load_obs_matrix_mpi_shared(
+    freqs: list[str],
+    obsmat_dir: Path,
+    comm,
+    tag="RC1.r01",
+    release="mss2",
+) -> dict:
     """
-    Combined two ObsMat objects (e.g. MSS3 south + north)
-    
-    The combined ObsMat applied both matrices and concatenates the outputs.
+    Same as `load_obs_matrix`, but each .npz file is loaded once per
+    node and shared across ranks via MPI shared memory (see
+    `load_obs_matrix_shared` / `SharedObsMat`).
+
+    Parameters
+    ----------
+    freqs, obsmat_dir, tag, release : see `load_obs_matrix`.
+    comm : MPI.Comm
+        Global MPI communicator (split internally by node).
+
+    Returns
+    -------
+    obsmats : dict
+        freq -> SharedObsMat (mss2) or CombinedObsMat of two
+        SharedObsMat (mss3).
     """
-    def __init__(self, north, south):
-        self.north = north
-        self.south = south
-    
-    def apply(self, x):
-        """
-        Apply north and south observation matrices
-        """
-        y_north = self.north.apply(x)
-        y_south = self.south.apply(x)
-        
-        return y_north + y_south
-    
+    obsmat_dir = Path(obsmat_dir)
+    obsmats = {}
+    for freq in freqs:
+        sat = FREQ_INST[freq]
+
+        if release == "mss2":
+            obsmat_file = obsmat_dir / OBSMAT_TEMPLATE.format(
+                tag=tag, sat=sat, flabel=freq
+            )
+            if comm is None or comm.rank == 0:
+                print(f"[{freq} GHz] loading obsmat (shared): {obsmat_file.name}")
+            obsmats[freq] = SharedObsMat(obsmat_file, comm)
+
+        elif release == "mss3":
+            north_file = obsmat_dir / f"obsmat_{sat}_{freq}_01_QU.north.npz"
+            south_file = obsmat_dir / f"obsmat_{sat}_{freq}_01_QU.south.npz"
+
+            if comm is None or comm.rank == 0:
+                print(f"[{freq}] loading MSS3 north (shared): {north_file.name}")
+                print(f"[{freq}] loading MSS3 south (shared): {south_file.name}")
+
+            north = SharedObsMat(north_file, comm)
+            south = SharedObsMat(south_file, comm)
+            obsmats[freq] = CombinedObsMat(north, south)
+
+        else:
+            raise ValueError(f"Unknown release: {release}")
+
+    return obsmats
