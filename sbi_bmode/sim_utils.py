@@ -119,13 +119,16 @@ class CMBSimulator:
         apply_highpass_filter=True,
         mask_file=None,
         fg_template_files=None,
-        observation_dict=None
+        observation_dict=None,
+        comm=None,
+        no_cmb_ee=False,
     ):
         self.lmax = data_dict["lmax"]
         self.lmin = data_dict["lmin"]
         self.nside = data_dict["nside"]
         self.nsplit = data_dict["nsplit"]
         self.delta_ell = data_dict["delta_ell"]
+        self.no_cmb_ee = no_cmb_ee
         self.pyilcdir = pyilcdir
         self.wavelet_type = wavelet_type
         self.use_dust_map = use_dust_map
@@ -140,6 +143,7 @@ class CMBSimulator:
         self.fiducial_T_dust = fiducial_T_dust
         self.fiducial_beta_sync = fiducial_beta_sync
         self.odir = odir
+        self.comm = comm
         self.bins = np.arange(self.lmin, self.lmax, self.delta_ell)
         self.coadd_equiv_crosses = coadd_equiv_crosses
 
@@ -176,31 +180,41 @@ class CMBSimulator:
         if self.observation_type == "obsmat":
             obsmat_dir = observation_dict.get("obsmat_dir")
             obsmat_freq = observation_dict.get("obsmat_freq")
+            use_shared_mem = observation_dict.get("use_shared_mem", True)
+            tag = observation_dict.get("tag", "RC1.r01")
+            release = observation_dict.get("release", "mss2")
             
-            if obsmat_freq is None:
-                print(
-                    f"[obsmat] Reusing ObsMat {obsmat_freq} "
-                    f"for all frequencies"
-                )
-                
-                loaded = so_utils.load_obs_matrix(
-                    freqs=[obsmat_freq],
-                    obsmat_dir=obsmat_dir,
-                )
-                
-                single_obsmat = loaded[obsmat_freq]
-
-                self.obsmat_by_freq = {
-                    fstr: single_obsmat
-                    for fstr in self.freq_strings
-                }
-                
-            else:
-                self.obsmat_by_freq = so_utils.load_obs_matrix(
-                    freqs=self.freq_strings,
-                    obsmat_dir=obsmat_dir,
-                )
+            if self.comm is None or self.comm.rank == 0:
+                print(f"Using observation type: {self.observation_type}")
+    
+            if use_shared_mem and self.comm is not None:
+                loader = so_utils.load_obs_matrix_mpi_shared
+                loader_kwargs = {"comm": self.comm}
+            else:  
+                loader = so_utils.load_obs_matrix
+                loader_kwargs = {}
         
+            if obsmat_freq is not None:
+                print(f"[obsmat] Reusing ObsMat {obsmat_freq} for all frequencies")
+                loaded = loader(
+                    freqs=[obsmat_freq], 
+                    obsmat_dir=obsmat_dir,
+                    tag=tag,
+                    release=release,
+                    **loader_kwargs
+                )
+                single_obsmat = loaded[obsmat_freq]
+                self.obsmat_by_freq = {fstr: single_obsmat for fstr in self.freq_strings}
+            else:
+                self.obsmat_by_freq = loader(
+                    freqs=self.freq_strings, 
+                    obsmat_dir=obsmat_dir, 
+                    tag=tag, 
+                    release=release, 
+                    **loader_kwargs
+                )
+            rank = self.comm.rank if self.comm is not None else "N/A"
+            print(f"[rank {rank}] ObsMat loaded for bands: {list(self.obsmat_by_freq.keys())}")
         
         if fg_template_files is not None:
             self.fg_templates = {}
@@ -222,6 +236,9 @@ class CMBSimulator:
             
         self.transfer_ell = None
         if self.observation_type == "transfer_function":
+            if self.comm is None or self.comm.rank == 0:
+                print(f"Using observation type: {self.observation_type}")
+                
             transfer_function_file = observation_dict.get("transfer_function_file")
         
             transfer_path = opj(specdir, transfer_function_file)
@@ -663,7 +680,7 @@ class CMBSimulator:
                 self.minfo,
                 self.ainfo,
                 signal_filter=self.highpass_filter,
-                no_cmb_ee=(self.mask is not None),
+                no_cmb_ee=self.no_cmb_ee,
             )
 
         else:
@@ -694,14 +711,15 @@ class CMBSimulator:
                 gamma_beta_sync=gamma_beta_sync,
                 rho_ds=rho_ds,
                 signal_filter=self.highpass_filter,
-                no_cmb_ee=(self.mask is not None),
-            )
-        omap = out_dict["data"]
-
-        sky_map = omap.copy() if return_maps else None  
-
-        omap = self.apply_observation_map(omap)
-            
+                no_cmb_ee=self.no_cmb_ee,
+                )
+        signal_map = out_dict["signal"]   # (nfreq, 2, npix)
+        noise_maps = out_dict["noise"]    # (nsplit, nfreq, 2, npix)        
+        sky_map = (signal_map[None] + noise_maps) if return_maps else None
+        obs_signal_map = self.apply_observation_map(signal_map[None])[0]   # (nfreq, 2, npix)
+        
+        omap = obs_signal_map[None] + noise_maps   # O Y B s + n, broadcast over splits
+        
         if self.mask is not None:
             omap *= self.mask
 
@@ -1017,12 +1035,15 @@ def gen_data_fg_template(
     -------
     out_dict : dict
         Output dictionary with following key-value pairs:
-            data : (nsplit, nfreq, npol, npix)
-                Simulated data.
+            signal : (nfreq, npol, npix)
+                Simulated signal.
+            noise : (nsplit, nfreq, npol, npix)
+                Simulated noise.
     """
 
     nfreq = len(freq_strings)
-    out = np.zeros((nsplit, nfreq, 2, minfo.npix))
+    signal_map = np.zeros((nfreq, 2, minfo.npix))
+    noise_maps = np.zeros((nsplit, nfreq, 2, minfo.npix))
 
     # Spawn rng for noise.
     seed = np.random.default_rng(seed)
@@ -1031,9 +1052,7 @@ def gen_data_fg_template(
     rngs_noise = rngs[1:]
 
     # Generate the CMB spectra.
-    cov_ell = spectra_utils.get_combined_cmb_spectrum(
-        r_tensor, A_lens, cov_scalar_ell, cov_tensor_ell
-    )
+    cov_ell = spectra_utils.get_combined_cmb_spectrum(r_tensor, A_lens, cov_scalar_ell, cov_tensor_ell)
     lmax = cov_ell.shape[-1] - 1
     assert ainfo.lmax == lmax
 
@@ -1045,19 +1064,12 @@ def gen_data_fg_template(
         b_ell = b_ells[fidx]
         if signal_filter is not None:
             b_ell = b_ell * signal_filter
-        out[:, fidx, :, :] = _gen_data_per_freq_fg_template(
-            fstr,
-            cov_noise_ell[fidx],
-            cmb_alm,
-            nsplit,
-            rngs_noise,
-            ainfo,
-            minfo,
-            b_ell,
-            fg_templates,
+        signal_map[fidx] = _gen_signal_map_per_freq_fg_template(
+            fstr, cmb_alm, ainfo, minfo, b_ell, fg_templates
         )
+        noise_maps[:, fidx] = _gen_noise_maps(cov_noise_ell[fidx], nsplit, rngs_noise, ainfo, minfo)
 
-    out_dict = {"data": out}
+    out_dict = {"signal": signal_map, "noise": noise_maps}
 
     return out_dict
 
@@ -1155,8 +1167,10 @@ def gen_data(
     -------
     out_dict : dict
         Output dictionary with following key-value pairs:
-            data : (nsplit, nfreq, npol, npix)
-                Simulated data.
+            signal : (nfreq, npol, npix)
+                Simulated signal.
+            noise : (nsplit, nfreq, npol, npix)
+                Simulated noise.
             gamma_dust_ell : (lmax + 1) array, optional
                 Realization of the gamma_dust power spectrum
             gamma_sync_ell : (lmax + 1) array, optional
@@ -1164,7 +1178,8 @@ def gen_data(
     """
 
     nfreq = len(freqs)
-    out = np.zeros((nsplit, nfreq, 2, minfo.npix))
+    signal_map = np.zeros((nfreq, 2, minfo.npix))
+    noise_maps = np.zeros((nsplit, nfreq, 2, minfo.npix))
 
     # Spawn rng for dust and noise.
     seed = np.random.default_rng(seed)
@@ -1238,53 +1253,28 @@ def gen_data(
         else:
             sync_map, beta_sync = None, None
 
-        gen_data_per_freq = lambda freq, cov_noise_ell, b_ell: _gen_data_per_freq_gamma(
-            freq,
-            cov_noise_ell,
-            beta_dust,
-            temp_dust,
-            freq_pivot_dust,
-            cmb_alm,
-            dust_map,
-            nsplit,
-            rngs_noise,
-            ainfo,
-            minfo,
-            b_ell,
-            sync_map=sync_map,
-            beta_sync=beta_sync,
-            freq_pivot_sync=freq_pivot_sync,
+        gen_signal_per_freq = lambda freq, b_ell: _gen_signal_map_per_freq_gamma(
+            freq, beta_dust, temp_dust, freq_pivot_dust, cmb_alm, dust_map,
+            ainfo, minfo, b_ell,
+            sync_map=sync_map, beta_sync=beta_sync, freq_pivot_sync=freq_pivot_sync,
         )
 
     else:
-        gen_data_per_freq = (
-            lambda freq, cov_noise_ell, b_ell: _gen_data_per_freq_simple(
-                freq,
-                cov_noise_ell,
-                beta_dust,
-                temp_dust,
-                freq_pivot_dust,
-                cmb_alm,
-                fg_alm,
-                nsplit,
-                rngs_noise,
-                ainfo,
-                minfo,
-                b_ell,
-                beta_sync=beta_sync,
-                freq_pivot_sync=freq_pivot_sync,
-            )
+        gen_signal_per_freq = lambda freq, b_ell: _gen_signal_map_per_freq_simple(
+            freq, beta_dust, temp_dust, freq_pivot_dust, cmb_alm, fg_alm,
+            ainfo, minfo, b_ell,
+            beta_sync=beta_sync, freq_pivot_sync=freq_pivot_sync,
         )
-
         gamma_dust_ell, gamma_sync_ell = None, None
 
     for fidx, freq in enumerate(freqs):
         b_ell = b_ells[fidx]
         if signal_filter is not None:
             b_ell = b_ell * signal_filter
-        out[:, fidx, :, :] = gen_data_per_freq(freq, cov_noise_ell[fidx], b_ell)
+        signal_map[fidx] = gen_signal_per_freq(freq, b_ell)
+        noise_maps[:, fidx] = _gen_noise_maps(cov_noise_ell[fidx], nsplit, rngs_noise, ainfo, minfo)
 
-    out_dict = {"data": out}
+    out_dict = {"signal": signal_map, "noise": noise_maps}
     if gamma_dust_ell is not None:
         out_dict["gamma_dust_ell"] = gamma_dust_ell
     if gamma_sync_ell is not None:
@@ -1292,71 +1282,15 @@ def gen_data(
 
     return out_dict
 
-
-def _gen_data_per_freq_simple(
-    freq,
-    cov_noise_ell,
-    beta_dust,
-    temp_dust,
-    freq_pivot_dust,
-    cmb_alm,
-    fg_alm,
-    nsplit,
-    rngs_noise,
-    ainfo,
-    minfo,
-    b_ell,
-    beta_sync=None,
-    freq_pivot_sync=None,
+def _gen_signal_map_per_freq_simple(
+    freq, beta_dust, temp_dust, freq_pivot_dust,
+    cmb_alm, fg_alm, ainfo, minfo, b_ell,
+    beta_sync=None, freq_pivot_sync=None,
 ):
-    """
-    Generate data for a given frequency, using a data model with constant beta.
-
-    Parameters
-    ----------
-    freq : float
-        Effective freq of passband in Hz.
-    cov_noise_ell : (npol, npol, nell) array
-        Noise covariance matrix.
-    beta_dust : float
-        Dust frequency power law index.
-    temp_dust : float
-        Dust temperature for the blackbody part of the model.
-    freq_pivot_dust : float
-        Pivot frequency for the frequency power law in Hz.
-    cmb_alm : (2, nelem) complex array
-        CMB E- and B-mode alms.
-    fg_alm : (1, nelem) or (2, nelem) complex array
-        Dust (and possibly synchrotron) B-mode amplitude alms.
-    nsplit : int
-        Number of splits of the data that have independent noise.
-    rngs_noise : array-like of numpy.random._generator.Generator object
-        Random number generators for per-split noise.
-    ainfo : pixell.curvedsky.alm_info object
-        Layout of spherical harmonic coefficients.
-    minfo : optweight.map_utils.MapInfo object
-        Geometry of output map.
-    b_ell : (lmax + 1) array
-        Beam for this frequency.
-    beta_sync : float, optional
-        Synchrotron frequency power law index.
-    freq_pivot_sync : float, optional
-        Pivot frequency for the synchrotron frequency power law in Hz.
-
-    Returns
-    -------
-    out : (nsplit, 2, npix) array
-        Stokes Q and U maps for each split.
-    """
-
-    out = np.zeros((nsplit, 2, minfo.npix))
-
     dust_factor = np.sqrt(
         spectra_utils.get_sed_dust(freq, beta_dust, temp_dust, freq_pivot_dust)
     )
-    dust_factor *= spectra_utils.get_g_fact(freq) / spectra_utils.get_g_fact(
-        freq_pivot_dust
-    )
+    dust_factor *= spectra_utils.get_g_fact(freq) / spectra_utils.get_g_fact(freq_pivot_dust)
 
     signal_alm = cmb_alm.copy()
     signal_alm[1] += fg_alm[0] * dust_factor
@@ -1364,135 +1298,61 @@ def _gen_data_per_freq_simple(
     ncomp_fg = fg_alm.shape[0]
     if ncomp_fg == 2:
         assert not None in (beta_sync, freq_pivot_sync)
-        sync_factor = np.sqrt(
-            spectra_utils.get_sed_sync(freq, beta_sync, freq_pivot_sync)
-        )
-        sync_factor *= spectra_utils.get_g_fact(freq) / spectra_utils.get_g_fact(
-            freq_pivot_sync
-        )
+        sync_factor = np.sqrt(spectra_utils.get_sed_sync(freq, beta_sync, freq_pivot_sync))
+        sync_factor *= spectra_utils.get_g_fact(freq) / spectra_utils.get_g_fact(freq_pivot_sync)
         signal_alm[1] += fg_alm[1] * sync_factor
 
-    # Apply beam.
     signal_alm = alm_c_utils.lmul(signal_alm, b_ell, ainfo, inplace=False)
+    signal_alm = np.asarray(signal_alm, dtype=np.complex128)
 
-    for sidx in range(nsplit):
-        data_alm = signal_alm + alm_utils.rand_alm(
-            cov_noise_ell, ainfo, rngs_noise[sidx], dtype=np.complex128
-        )
-        data_alm = np.asarray(data_alm, dtype=np.complex128)
-        sht.alm2map(data_alm, out[sidx], ainfo, minfo, 2)
+    signal_map = np.zeros((2, minfo.npix))
+    sht.alm2map(signal_alm, signal_map, ainfo, minfo, 2)
+    return signal_map
 
-    return out
-
-
-def _gen_data_per_freq_gamma(
-    freq,
-    cov_noise_ell,
-    beta_dust,
-    temp_dust,
-    freq_pivot_dust,
-    cmb_alm,
-    dust_map,
-    nsplit,
-    rngs_noise,
-    ainfo,
-    minfo,
-    b_ell,
-    sync_map=None,
-    beta_sync=None,
-    freq_pivot_sync=None,
+def _gen_signal_map_per_freq_gamma(
+    freq, beta_dust, temp_dust, freq_pivot_dust,
+    cmb_alm, dust_map, ainfo, minfo, b_ell,
+    sync_map=None, beta_sync=None, freq_pivot_sync=None,
 ):
-    """
-    Generate data for a given frequency, using a data model with varying beta.
-
-    Parameters
-    ----------
-    freq : float
-        Effective freq of passband in Hz.
-    cov_noise_ell : (npol, npol, nell) array
-        Noise covariance matrix.
-    beta_dust : (npix) array
-        Beta map, including monopole of beta.
-    temp_dust : float
-        Dust temperature for the blackbody part of the model.
-    freq_pivot_dust : float
-        Pivot frequency for the frequency power law.
-    cmb_alm : (2, nelem) complex array
-        CMB E- and B-mode alms.
-    dust_map : (2, nelem) array
-        Dust amplitude Stokes Q and U maps.
-    nsplit : int
-        Number of splits of the data that have independent noise.
-    rngs_noise : array-like of numpy.random._generator.Generator object
-        Random number generators for per-split noise.
-    ainfo : pixell.curvedsky.alm_info object
-        Layout of spherical harmonic coefficients.
-    minfo : optweight.map_utils.MapInfo object
-        Geometry of output map.
-    b_ell : (lmax + 1) array
-        Beam for this frequency.
-    sync_map : (2, nelem) array, optional
-        Synchrotron amplitude Stokes Q and U maps.
-    beta_sync : (npix) array
-        Beta synchrotron map, including monopole of beta.
-    freq_pivot_sync : float
-        Pivot frequency for the synchrotron frequency power law.
-
-    Returns
-    -------
-    out : (nsplit, 2, npix) array
-        Stokes Q and U maps for each split.
-    """
-
-    out = np.zeros((nsplit, 2, minfo.npix))
-
-    # Apply spatially varying SED scaling in real space.
     sed_map = spectra_utils.get_sed_dust(freq, beta_dust, temp_dust, freq_pivot_dust)
     scaled_dust_map = dust_map * np.sqrt(sed_map)
-    scaled_dust_map *= spectra_utils.get_g_fact(freq) / spectra_utils.get_g_fact(
-        freq_pivot_dust
-    )
+    scaled_dust_map *= spectra_utils.get_g_fact(freq) / spectra_utils.get_g_fact(freq_pivot_dust)
 
     fg_map = scaled_dust_map
-
     if sync_map is not None:
         sed_sync_map = spectra_utils.get_sed_sync(freq, beta_sync, freq_pivot_sync)
         scaled_sync_map = sync_map * np.sqrt(sed_sync_map)
-        scaled_sync_map *= spectra_utils.get_g_fact(freq) / spectra_utils.get_g_fact(
-            freq_pivot_sync
-        )
+        scaled_sync_map *= spectra_utils.get_g_fact(freq) / spectra_utils.get_g_fact(freq_pivot_sync)
         fg_map += scaled_sync_map
 
-    # Apply beam.
     fg_alm = np.zeros(cmb_alm.shape, dtype=np.complex128)
     sht.map2alm(fg_map, fg_alm, minfo, ainfo, 2)
     signal_alm = cmb_alm + fg_alm
     signal_alm = alm_c_utils.lmul(signal_alm, b_ell, ainfo, inplace=False)
+    signal_alm = np.asarray(signal_alm, dtype=np.complex128)
 
-    for sidx in range(nsplit):
-        data_alm = signal_alm + alm_utils.rand_alm(
-            cov_noise_ell, ainfo, rngs_noise[sidx], dtype=np.complex128
-        )
-        data_alm = np.asarray(data_alm, dtype=np.complex128)
-        sht.alm2map(data_alm, out[sidx], ainfo, minfo, 2)
+    signal_map = np.zeros((2, minfo.npix))
+    sht.alm2map(signal_alm, signal_map, ainfo, minfo, 2)
+    return signal_map
 
-    return out
+def _gen_signal_map_per_freq_fg_template(fstr, cmb_alm, ainfo, minfo, b_ell, fg_templates):
+    signal_alm = cmb_alm.copy()
+    signal_alm[1] += fg_templates[fstr]
+    signal_alm = alm_c_utils.lmul(signal_alm, b_ell, ainfo, inplace=False)
+    signal_alm = np.asarray(signal_alm, dtype=np.complex128)
 
+    signal_map = np.zeros((2, minfo.npix))
+    sht.alm2map(signal_alm, signal_map, ainfo, minfo, 2)
+    return signal_map
 
-def _gen_data_per_freq_fg_template(
-    fstr, cov_noise_ell, cmb_alm, nsplit, rngs_noise, ainfo, minfo, b_ell, fg_templates
-):
+def _gen_noise_maps(cov_noise_ell, nsplit, rngs_noise, ainfo, minfo):
     """
-    Generate data for a given frequency, using foreground templates.
+    Generate noise maps for a given frequency.
 
     Parameters
     ----------
-    fstr : float
-        Identifier of band, e.g. f090.
     cov_noise_ell : (npol, npol, nell) array
         Noise covariance matrix.
-    cmb_alm : (2, nelem) complex array
-        CMB E- and B-mode alms.
     nsplit : int
         Number of splits of the data that have independent noise.
     rngs_noise : array-like of numpy.random._generator.Generator object
@@ -1501,10 +1361,6 @@ def _gen_data_per_freq_fg_template(
         Layout of spherical harmonic coefficients.
     minfo : optweight.map_utils.MapInfo object
         Geometry of output map.
-    b_ell : (lmax + 1) array
-        Beam for this frequency.
-    fg_templates : dict
-        Dictionary with fstr keys containing foreground B-mode alms.
 
     Returns
     -------
@@ -1514,21 +1370,14 @@ def _gen_data_per_freq_fg_template(
 
     out = np.zeros((nsplit, 2, minfo.npix))
 
-    signal_alm = cmb_alm.copy()
-    signal_alm[1] += fg_templates[fstr]
-
-    # Apply beam.
-    signal_alm = alm_c_utils.lmul(signal_alm, b_ell, ainfo, inplace=False)
-
     for sidx in range(nsplit):
-        data_alm = signal_alm + alm_utils.rand_alm(
+        noise_alm = alm_utils.rand_alm(
             cov_noise_ell, ainfo, rngs_noise[sidx], dtype=np.complex128
         )
-        data_alm = np.asarray(data_alm, dtype=np.complex128)
-        sht.alm2map(data_alm, out[sidx], ainfo, minfo, 2)
+        noise_alm = np.asarray(noise_alm, dtype=np.complex128)
+        sht.alm2map(noise_alm, out[sidx], ainfo, minfo, 2)
 
     return out
-
 
 def apply_obsmatrix(
     imap: np.ndarray,
@@ -1900,31 +1749,24 @@ def estimate_transfer_function(
     return_diagnostics=False,
 ):
     """
-    Estimate the transfer function
-
-        T_ell = <C_ell^obs> / <C_ell^sky>
-
-    where the averages are taken over Monte Carlo simulations.
+    Estimate B-mode transfer function from Monte Carlo simulations.
 
     Parameters
     ----------
-    return_diagnostics : bool, optional
-        If set, also return per-bin means/errors for both the BB spectra
-        and the transfer function ratio itself, for plotting.
+    maps_sky : (nsims, nsplit, 2, npix) array
+        Unobserved/reference split maps.
+        Splits 0 and 1 are cross-correlated to remove noise bias.
+
+    maps_obs : (nsims, nsplit, 2, npix) array
+        Observed split maps.
 
     Returns
     -------
-    transfer_ell : (lmax + 1,) array
+    transfer_ell : array
+        Transfer function T_ell interpolated up to lmax.
+
     diagnostics : dict, optional
-        Only if return_diagnostics=True. Keys:
-            ell : (nbins,) bandpower centers
-            bb_sky_mean, bb_obs_mean : (nbins,) MC mean spectra
-            bb_sky_err, bb_obs_err : (nbins,) standard error on the mean
-            transfer_bins_mean : (nbins,) MC mean of per-sim ratio
-            transfer_bins_err : (nbins,) standard error on that mean
-            transfer_bins_std : (nbins,) sim-to-sim std (not divided by
-                sqrt(nsims)) -- use this if you want to show the spread
-                of individual draws rather than uncertainty on the mean.
+        Intermediate spectra and uncertainties.
     """
 
     nsims = maps_sky.shape[0]
@@ -1932,64 +1774,144 @@ def estimate_transfer_function(
     bb_sky_all = []
     bb_obs_all = []
     ratio_all = []
+
     ells_eff = None
 
     for i in range(nsims):
+
         print(f"[transfer function] sim {i + 1}/{nsims}")
 
         cl_sky = estimate_pseudo_cl(
-            maps_sky[i], maps_sky[i], ell_bin, nside, mask_dir,
-            apod_scale=apod_scale, apod_type=apod_type,
+            maps_sky[i, 0],
+            maps_sky[i, 1],
+            ell_bin,
+            nside,
+            mask_dir,
+            apod_scale=apod_scale,
+            apod_type=apod_type,
         )
+
         cl_obs = estimate_pseudo_cl(
-            maps_obs[i], maps_obs[i], ell_bin, nside, mask_dir,
-            apod_scale=apod_scale, apod_type=apod_type,
+            maps_obs[i, 0],
+            maps_obs[i, 1],
+            ell_bin,
+            nside,
+            mask_dir,
+            apod_scale=apod_scale,
+            apod_type=apod_type,
         )
 
         if ells_eff is None:
             ells_eff = cl_sky["ell"]
 
-        bb_sky_all.append(cl_sky["BB"])
-        bb_obs_all.append(cl_obs["BB"])
+        bb_sky = np.asarray(cl_sky["BB"])
+        bb_obs = np.asarray(cl_obs["BB"])
 
-        # Per-sim ratio, computed here rather than from the MC-averaged
-        # spectra, so we can track how the ratio itself fluctuates.
-        ratio_i = np.zeros_like(cl_sky["BB"])
-        good_i = np.abs(cl_sky["BB"]) > 1e-30
-        ratio_i[good_i] = cl_obs["BB"][good_i] / cl_sky["BB"][good_i]
+        bb_sky_all.append(bb_sky)
+        bb_obs_all.append(bb_obs)
+
+        # Individual simulation transfer
+        ratio_i = np.full_like(bb_sky, np.nan)
+
+        good_i = (
+            np.isfinite(bb_sky)
+            & np.isfinite(bb_obs)
+            & (np.abs(bb_sky) > 1e-30)
+        )
+
+        ratio_i[good_i] = bb_obs[good_i] / bb_sky[good_i]
+
         ratio_all.append(ratio_i)
 
-    bb_sky_all = np.asarray(bb_sky_all)   # (nsims, nbins)
-    bb_obs_all = np.asarray(bb_obs_all)
-    ratio_all = np.asarray(ratio_all)     # (nsims, nbins)
 
-    # Monte Carlo averages of the spectra (used for the central T_ell).
-    mean_bb_sky = np.mean(bb_sky_all, axis=0)
-    mean_bb_obs = np.mean(bb_obs_all, axis=0)
+    # Convert to arrays
+    bb_sky_all = np.asarray(bb_sky_all)
+    bb_obs_all = np.asarray(bb_obs_all)
+    ratio_all = np.asarray(ratio_all)
+
+
+    # Monte Carlo mean spectra
+    mean_bb_sky = np.nanmean(bb_sky_all, axis=0)
+    mean_bb_obs = np.nanmean(bb_obs_all, axis=0)
+
+
+    # ---------------------------------------------------------
+    # Central transfer function
+    #
+    # T_l = C_l(obs) / C_l(sky)
+    #
+    # Undefined bins (usually low ell) are set to zero
+    # ---------------------------------------------------------
 
     transfer_bins = np.zeros_like(mean_bb_sky)
-    good = np.abs(mean_bb_sky) > 1e-30
-    transfer_bins[good] = mean_bb_obs[good] / mean_bb_sky[good]
 
-    # Interpolate the central transfer function onto every ell.
-    ells_full = np.arange(lmax + 1)
-    transfer_ell = np.interp(
-        ells_full, ells_eff, transfer_bins,
-        left=transfer_bins[0], right=transfer_bins[-1],
+    good = (
+        np.isfinite(mean_bb_sky)
+        & np.isfinite(mean_bb_obs)
+        & (np.abs(mean_bb_sky) > 1e-30)
     )
+
+    transfer_bins[good] = (
+        mean_bb_obs[good] / mean_bb_sky[good]
+    )
+
+    transfer_bins[~good] = 0.0
+
+
+    # ---------------------------------------------------------
+    # Interpolate to every ell
+    # Only use valid bins
+    # ---------------------------------------------------------
+
+    ells_full = np.arange(lmax + 1)
+
+    good_interp = np.isfinite(transfer_bins)
+
+    transfer_ell = np.interp(
+        ells_full,
+        ells_eff[good_interp],
+        transfer_bins[good_interp],
+        left=0.0,
+        right=transfer_bins[good_interp][-1],
+    )
+
 
     if not return_diagnostics:
         return transfer_ell
 
+
     diagnostics = {
+
         "ell": ells_eff,
+
         "bb_sky_mean": mean_bb_sky,
         "bb_obs_mean": mean_bb_obs,
-        "bb_sky_err": np.std(bb_sky_all, axis=0) / np.sqrt(nsims),
-        "bb_obs_err": np.std(bb_obs_all, axis=0) / np.sqrt(nsims),
-        "transfer_bins_mean": np.mean(ratio_all, axis=0),
-        "transfer_bins_std": np.std(ratio_all, axis=0),
-        "transfer_bins_err": np.std(ratio_all, axis=0) / np.sqrt(nsims),
+
+        "bb_sky_err":
+            np.nanstd(bb_sky_all, axis=0) / np.sqrt(nsims),
+
+        "bb_obs_err":
+            np.nanstd(bb_obs_all, axis=0) / np.sqrt(nsims),
+
+
+        # Individual simulation transfer functions
+        "transfer_bins_mean":
+            np.nanmean(ratio_all, axis=0),
+
+        "transfer_bins_std":
+            np.nanstd(ratio_all, axis=0),
+
+        "transfer_bins_err":
+            np.nanstd(ratio_all, axis=0) / np.sqrt(nsims),
+
+        # Which bins have valid transfer estimate
+        "transfer_bins_valid":
+            good,
+
+        # Number of simulations contributing per bin
+        "n_valid_sims":
+            np.sum(np.isfinite(ratio_all), axis=0),
     }
+
 
     return transfer_ell, diagnostics
