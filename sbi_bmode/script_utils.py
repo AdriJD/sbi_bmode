@@ -24,7 +24,10 @@ def parse_config(config):
         Dictionary with parameters that we keep fixed.
     params_dict : dict
         Dictionary with parameters that we sample.  
-    obsmat_dict : dict
+    observation_dict : dict
+        Dictionary describing the observation model (identity/obsmat/transfer_function).
+    transfer_function_dict : dict or None
+        Dictionary with transfer-function estimation settings, if present in config.
     '''
 
     data_dict = config['data']
