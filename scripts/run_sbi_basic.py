@@ -16,7 +16,6 @@ from sbi.utils.user_input_checks import (
 )
 from sbi.neural_nets.embedding_nets import FCEmbedding
 from sbi.neural_nets import posterior_nn
-# from sbi.neural_nets import flowmatching_nn
 from sbi.neural_nets import posterior_flow_nn
 
 from sbi_bmode import (
@@ -219,8 +218,8 @@ def main(odir, config, specdir, seed, n_train, n_samples, n_rounds, pyilcdir, us
          data_std_file=None, previous_data_obs_file=None, previous_data_file=None,
          previous_params_file=None, num_hidden_features=50, num_transforms=5,
          num_blocks=2, clip_max_norm=5.0, training_batch_size=200, learning_rate=5e-4,
-         max_num_epochs=1000, stop_after_epochs=20, tsnpe=False, mask_file=None,
-         fg_template_files=None, test_proposal_file=None, test_data_obs_file=None):
+         max_num_epochs=1000, stop_after_epochs=20, tsnpe=False, mask_file=None, no_cmb_ee=False,
+         fg_template_files=None, test_proposal_file=None, test_data_obs_file=None, comm=comm):
     '''
     Run SBI.
 
@@ -340,6 +339,8 @@ def main(odir, config, specdir, seed, n_train, n_samples, n_rounds, pyilcdir, us
         If set, use truncated proposals for SNPE (TSNPE) method.
     mask_file : str
         Path to .fits file containing mask in HEALPix format.
+    no_cmb_ee : bool, optional
+        If set, do not include CMB EE in a_lm.
     fg_template_files : dict, optional
         Dictionary such that d['dust']['f090'] returns a path to set of B-mode spherical
         harmonic coefficients that represent a foreground template. Possible outer keys
@@ -443,14 +444,33 @@ def main(odir, config, specdir, seed, n_train, n_samples, n_rounds, pyilcdir, us
         score_params = None
 
     cmb_simulator = sim_utils.CMBSimulator(
-        specdir, data_dict, fixed_params_dict, pyilcdir=pyilcdir, wavelet_type=wavelet_type,
-        use_dust_map=use_dust_map, use_dbeta_map=use_dbeta_map, use_sync_map=use_sync_map,
-        use_dbeta_sync_map=use_dbeta_sync_map, deproj_dust=deproj_dust, deproj_dbeta=deproj_dbeta,
-        deproj_sync=deproj_sync, deproj_dbeta_sync=deproj_dbeta_sync, fiducial_beta=fiducial_beta,
-        fiducial_T_dust=fiducial_T_dust, fiducial_beta_sync=fiducial_beta_sync, odir=odir,
-        norm_params=norm_params, score_params=score_params,
-        coadd_equiv_crosses=coadd_equiv_crosses, mask_file=mask_file,
-        fg_template_files=fg_template_files)
+        specdir,
+        data_dict,
+        fixed_params_dict,
+        pyilcdir=pyilcdir,
+        wavelet_type=wavelet_type,
+        use_dust_map=use_dust_map,
+        use_dbeta_map=use_dbeta_map,
+        use_sync_map=use_sync_map,
+        use_dbeta_sync_map=use_dbeta_sync_map,
+        deproj_dust=deproj_dust,
+        deproj_dbeta=deproj_dbeta,
+        deproj_sync=deproj_sync,
+        deproj_dbeta_sync=deproj_dbeta_sync,
+        fiducial_beta=fiducial_beta,
+        fiducial_T_dust=fiducial_T_dust,
+        fiducial_beta_sync=fiducial_beta_sync,
+        odir=odir,
+        norm_params=norm_params,
+        score_params=score_params,
+        coadd_equiv_crosses=coadd_equiv_crosses,
+        mask_file=mask_file,
+        no_cmb_ee=no_cmb_ee,
+        fg_template_files=fg_template_files,
+        observation_dict=observation_dict,
+        apply_highpass_filter=apply_highpass_filter,
+        comm=comm,
+    )
 
     proposal = prior
 
@@ -725,6 +745,7 @@ if __name__ == '__main__':
                         help='Do not remove signal below lmin in simulated maps.')
     parser.add_argument('--mask-file', type=str,
                         help="Path to .fits file containing mask in HEALPix format.")
+    parser.add_argument('--no-cmb-ee', action='store_true', help='Do not include CMB EE.')
     parser.add_argument('--fg-template-config', type=str,
                         help="Path to .yaml config with [{dust,sync}][fstr] keys pointing to foreground \
                         B-mode alms. If provided, used for test set only.")
@@ -798,24 +819,25 @@ if __name__ == '__main__':
         fg_template_files = comm.bcast(fg_template_files, root=0)
     
     main(odir, config, args.specdir, args.seed, args.n_train,
-         args.n_samples, args.n_rounds, args.pyilcdir, not args.no_dust_map, args.use_dbeta_map,
-         args.deproj_dust, args.deproj_dbeta, args.fiducial_beta, args.fiducial_T_dust,
-         use_sync_map=args.use_sync_map, use_dbeta_sync_map=args.use_dbeta_sync_map,
-         deproj_sync=args.deproj_sync, deproj_dbeta_sync=args.deproj_dbeta_sync,
-         fiducial_beta_sync=args.fiducial_beta_sync, wavelet_type=args.wavelet_type,
-         no_norm=args.no_norm, score_compress=args.score_compress, embed=args.embed,
-         embed_num_layers=args.embed_num_layers, embed_num_hiddens=args.embed_num_hiddens,
-         embed_num_output_fact=args.embed_num_output_fact, fmpe=args.fmpe, e_moped=args.e_moped,
-         n_moped=args.n_moped, density_estimator_type=args.density_estimator_type,
-         coadd_equiv_crosses=not args.no_coadd_equiv_crosses,
-         apply_highpass_filter=not args.no_highpass_filter, n_test=args.n_test,
-         previous_seed_file=args.previous_seed_file, data_mean_file=args.data_mean,
-         data_std_file=args.data_std, previous_data_obs_file=args.data_obs,
-         previous_data_file=args.previous_data, previous_params_file=args.previous_params,
-         num_hidden_features=args.num_hidden_features, num_transforms=args.num_transforms,
-         num_blocks=args.num_blocks, clip_max_norm=args.clip_max_norm,
-         training_batch_size=args.training_batch_size, learning_rate=args.learning_rate,
-         max_num_epochs=args.max_num_epochs, stop_after_epochs=args.stop_after_epochs,
-         tsnpe=args.tsnpe, mask_file=args.mask_file, fg_template_files=fg_template_files,
-         test_proposal_file=args.test_proposal, test_data_obs_file=args.test_data_obs)
+        args.n_samples, args.n_rounds, args.pyilcdir, not args.no_dust_map, args.use_dbeta_map,
+        args.deproj_dust, args.deproj_dbeta, args.fiducial_beta, args.fiducial_T_dust,
+        use_sync_map=args.use_sync_map, use_dbeta_sync_map=args.use_dbeta_sync_map,
+        deproj_sync=args.deproj_sync, deproj_dbeta_sync=args.deproj_dbeta_sync,
+        fiducial_beta_sync=args.fiducial_beta_sync, wavelet_type=args.wavelet_type,
+        no_norm=args.no_norm, score_compress=args.score_compress, embed=args.embed,
+        embed_num_layers=args.embed_num_layers, embed_num_hiddens=args.embed_num_hiddens,
+        embed_num_output_fact=args.embed_num_output_fact, fmpe=args.fmpe, e_moped=args.e_moped,
+        n_moped=args.n_moped, density_estimator_type=args.density_estimator_type,
+        coadd_equiv_crosses=not args.no_coadd_equiv_crosses,
+        apply_highpass_filter=not args.no_highpass_filter, n_test=args.n_test,
+        previous_seed_file=args.previous_seed_file, data_mean_file=args.data_mean,
+        data_std_file=args.data_std, previous_data_obs_file=args.data_obs,
+        previous_data_file=args.previous_data, previous_params_file=args.previous_params,
+        num_hidden_features=args.num_hidden_features, num_transforms=args.num_transforms,
+        num_blocks=args.num_blocks, clip_max_norm=args.clip_max_norm,
+        training_batch_size=args.training_batch_size, learning_rate=args.learning_rate,
+        max_num_epochs=args.max_num_epochs, stop_after_epochs=args.stop_after_epochs,
+        tsnpe=args.tsnpe, mask_file=args.mask_file, no_cmb_ee=args.no_cmb_ee, 
+        fg_template_files=fg_template_files, 
+        test_proposal_file=args.test_proposal, test_data_obs_file=args.test_data_obs)
     
