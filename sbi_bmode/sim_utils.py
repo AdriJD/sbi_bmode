@@ -260,7 +260,11 @@ class CMBSimulator:
                 neginf=0.0,
             )
 
-            print("SQRT transfer", sqrt_transfer)
+            if self.comm is not None and self.comm.rank == 0:
+                print(f"Transfer function loaded from {transfer_path}")
+                print("Transfer function (sqrt) shape:", sqrt_transfer.shape)
+                print("Transfer function (sqrt) min:", np.min(sqrt_transfer))
+                print("Transfer function (sqrt) max:", np.max(sqrt_transfer))
 
             if self.highpass_filter is not None:
                 self.highpass_filter *= sqrt_transfer
@@ -813,6 +817,7 @@ class CMBSimulator:
             return apply_obsmatrix(
                 omap,
                 self.obsmat_by_freq,
+                self.comm,
             )
 
         elif self.observation_type == "transfer_function":
@@ -1382,6 +1387,7 @@ def _gen_noise_maps(cov_noise_ell, nsplit, rngs_noise, ainfo, minfo):
 def apply_obsmatrix(
     imap: np.ndarray,
     obsmats: dict,
+    comm=None,
 ) -> np.ndarray:
     """
     Apply observation matrices to sky maps.
@@ -1411,11 +1417,10 @@ def apply_obsmatrix(
 
     for i in range(nsplit):
         for j, freq in enumerate(obsmats.keys()):
-
-            print(f"[{freq}] applying observation matrix split {i}")
-
-            # Pad to IQU with zero temperature, since the ObsMat expects
-            # a full IQU map (3 * npix), not just Q/U.
+            
+            if comm is None or comm.rank == 0:
+                print(f"[obsmat] split {i}, freq {freq}")
+            
             sky_map_iqu = np.zeros((3, npix), dtype=imap.dtype)
             sky_map_iqu[1:] = imap[i, j]
             
