@@ -2,7 +2,6 @@ from pathlib import Path
 
 import numpy as np
 import scipy
-from mpi4py import MPI
 from toast.ops import ObsMat
 
 # In arcmin.
@@ -210,6 +209,8 @@ def get_sat_noise_old(
     return n_ell
 
 def load_obs_matrix_shared(filename, comm):
+    from mpi4py import MPI
+    
     node_comm = comm.Split_type(MPI.COMM_TYPE_SHARED)
     node_rank = node_comm.Get_rank()
 
