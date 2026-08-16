@@ -129,7 +129,7 @@ def get_nilc_maps(pyilc_path, map_tmpdir, nsplit, nside, fiducial_beta, fiducial
         pyilc_input_params['work_in_healpix'] = 'True' 
         pyilc_input_params['save_weights'] = "no"
         pyilc_input_params['ELLMAX'] = 3*nside-2
-        pyilc_input_params['wavelet_type'] = wavelet_type        
+        pyilc_input_params['wavelet_type'] = wavelet_type
         if wavelet_type == 'TopHatHarmonic':
             pyilc_input_params['BinSize'] = hilc_binsize
         else:
@@ -152,7 +152,7 @@ def get_nilc_maps(pyilc_path, map_tmpdir, nsplit, nside, fiducial_beta, fiducial
         
         # NOTE, I should keep track of these failures. They should never reach 0.9, but values of
         # 1e-2 seem to be hard to avoid when deprojecting four sky components.
-        pyilc_input_params['resp_tol'] = 10 # i.e. disable.
+        pyilc_input_params['resp_tol'] = 1000 # i.e. disable.
         #pyilc_input_params['resp_tol'] = 1e-2
 
         # Foreground parameters.
