@@ -251,26 +251,26 @@ class CMBSimulator:
                     f"does not match lmax={self.lmax}"
                 )
             
-            sqrt_transfer = np.sqrt(self.transfer_ell)
-            # Replace NaN, +inf, -inf with 0
-            sqrt_transfer = np.nan_to_num(
-                sqrt_transfer,
-                nan=0.0,
-                posinf=0.0,
-                neginf=0.0,
+            assert np.all(np.isfinite(self.transfer_ell)), (
+                "Loaded transfer function contains non-finite values; "
+                "expected NaN/inf already cleaned at generation time "
+                "in estimate_transfer_function."
+            )
+            assert np.all(self.transfer_ell >= 0), (
+                "Amplitude-level transfer function should be non-negative."
             )
 
             if self.comm is not None and self.comm.rank == 0:
                 print(f"Transfer function loaded from {transfer_path}")
-                print("Transfer function (sqrt) shape:", sqrt_transfer.shape)
-                print("Transfer function (sqrt) min:", np.min(sqrt_transfer))
-                print("Transfer function (sqrt) max:", np.max(sqrt_transfer))
+                print("Transfer function shape:", self.transfer_ell.shape)
+                print("Transfer function min:", np.min(self.transfer_ell))
+                print("Transfer function max:", np.max(self.transfer_ell))
 
             if self.highpass_filter is not None:
-                self.highpass_filter *= sqrt_transfer
+                self.highpass_filter *= self.transfer_ell
                 print("High pass filter:", self.highpass_filter)
             else:
-                self.highpass_filter = sqrt_transfer
+                self.highpass_filter = self.transfer_ell
                             
         if pyilcdir:
             self.ncomp = 1
@@ -392,7 +392,12 @@ class CMBSimulator:
             self.score_compress = lambda x: self.grad_logdens(score_params_arr, x)
 
         if mask_file:
-            self.mask = hp.read_map(mask_file).astype(np.float64)
+            if self.comm is None or self.comm.rank == 0:
+                print(f"Loading mask from {mask_file}")
+                mask = hp.read_map(mask_file).astype(np.float64)
+            else:
+                mask = None
+            self.mask = self.comm.bcast(mask, root=0) if self.comm is not None else mask
         else:
             self.mask = None
 
@@ -769,7 +774,6 @@ class CMBSimulator:
                 remove_files=True,
                 debug=False,
             )
-
             spectra_nilc = estimate_spectra_nilc(nilc_maps, self.minfo, self.ainfo)
 
         if self.coadd_equiv_crosses:
@@ -1705,35 +1709,32 @@ def get_highpass_filter(lmin, lmax, delta_ell):
 
     return f_ell
 
-def estimate_pseudo_cl(map_a, map_b, ell_bin, nside, mask_dir, apod_scale=2.0, apod_type="C2"):
-    mask = hp.read_map(mask_dir, dtype=np.float32)
-    mask_apod = nmt.mask_apodization(mask, apod_scale, apod_type)
-    
-    fsky_eff = (
-        mask_apod.mean()**2 / np.mean(mask_apod**2)
-    )
+def estimate_pseudo_cl(map_a, map_b, mask_apod, bins):
+    """
+    Estimate pseudo-Cl spectra between two maps using NaMaster.
 
-    print(f"f_sky before apodization : {mask.mean():.4f}")
-    print(f"Effective f_sky         : {fsky_eff:.4f}")
-    
-    print("Computing pseudo-Cl...")
-    f_a = nmt.NmtField(
-        mask_apod,
-        [map_a[0], map_a[1]],
-    )
+    Parameters
+    ----------
+    map_a : (2, npix) array
+        Q, U map for the first field.
+    map_b : (2, npix) array
+        Q, U map for the second field.
+    mask_apod : (npix) array
+        Pre-apodized mask, shared across all sims/calls.
+    bins : pymaster.NmtBin object
+        Pre-built bandpower binning object, shared across all sims/calls.
 
-    f_b = nmt.NmtField(
-        mask_apod,
-        [map_b[0], map_b[1]],
-    )
-    
-    bins = nmt.NmtBin.from_nside_linear(nside, ell_bin)
-    cl_EE, cl_EB, cl_BE, cl_BB = nmt.compute_full_master(
-        f_a,
-        f_b,
-        bins,
-    )
-    
+    Returns
+    -------
+    out : dict
+        Dictionary with keys "ell", "EE", "EB", "BE", "BB".
+    """
+
+    f_a = nmt.NmtField(mask_apod, [map_a[0], map_a[1]])
+    f_b = nmt.NmtField(mask_apod, [map_b[0], map_b[1]])
+
+    cl_EE, cl_EB, cl_BE, cl_BB = nmt.compute_full_master(f_a, f_b, bins)
+
     return {
         "ell": bins.get_effective_ells(),
         "EE": cl_EE,
@@ -1745,36 +1746,90 @@ def estimate_pseudo_cl(map_a, map_b, ell_bin, nside, mask_dir, apod_scale=2.0, a
 def estimate_transfer_function(
     maps_sky,
     maps_obs,
-    ell_bin,
+    delta_ell,
     nside,
     lmax,
-    mask_dir,
+    mask_file,
     apod_scale=2.0,
     apod_type="C2",
+    snr_thresh=3.0,
+    min_valid_sims=1,
+    apod_mask_file=None,
     return_diagnostics=False,
 ):
     """
-    Estimate B-mode transfer function from Monte Carlo simulations.
+    Estimate B-mode amplitude-level transfer function from Monte Carlo simulations.
 
     Parameters
     ----------
-    maps_sky : (nsims, nsplit, 2, npix) array
-        Unobserved/reference split maps.
-        Splits 0 and 1 are cross-correlated to remove noise bias.
+    maps_sky : (nsims, 2, 2, npix) array
+        Unobserved/reference split maps. Only the first two splits
+        (indices 0 and 1) are used and cross-correlated to remove noise bias.
 
-    maps_obs : (nsims, nsplit, 2, npix) array
-        Observed split maps.
+    maps_obs : (nsims, 2, 2, npix) array
+        Observed split maps, same convention as maps_sky.
+
+    delta_ell : int
+        Bandpower bin width passed to NmtBin.from_nside_linear.
+
+    mask_file : str
+        Path to the mask FITS file.
+
+    snr_thresh : float, optional
+        Minimum ratio of |mean_bb_sky| to its Monte Carlo standard error
+        for a bin to be considered valid.
+
+    min_valid_sims : int, optional
+        Minimum number of sims with a finite individual-sim ratio for a
+        bin to be considered valid.
+        
+    apod_mask_file : str, optional
+        Path to save/load the apodized mask as a .fits file. If the file
+        already exists, it is loaded directly (skipping mask_file, apod_scale,
+        apod_type). If it does not exist, the mask is apodized from mask_file
+        and then written to this path. If None, the mask is apodized fresh
+        every call and not cached.
 
     Returns
     -------
-    transfer_ell : array
-        Transfer function T_ell interpolated up to lmax.
+    sqrt_transfer_ell : (lmax + 1) array
+        Amplitude-level transfer function, sqrt(C_l(obs)/C_l(sky)),
+        interpolated to every ell and cleaned of NaN/inf. This is what
+        should be multiplied into a harmonic-space signal filter.
 
     diagnostics : dict, optional
-        Intermediate spectra and uncertainties.
+        Intermediate spectra and uncertainties, including the pre-sqrt
+        power-space transfer function under "transfer_ell_power".
     """
 
+    assert maps_sky.shape == maps_obs.shape, (
+        f"{maps_sky.shape=} != {maps_obs.shape=}"
+    )
+    assert maps_sky.shape[1] == 2, (
+        "Only nsplit == 2 is currently supported "
+        f"(got maps_sky.shape[1] = {maps_sky.shape[1]})"
+    )
+
     nsims = maps_sky.shape[0]
+
+    # ---------------------------------------------------------
+    # Precompute mask/apodization/binning once, shared across sims.
+    # ---------------------------------------------------------
+    if apod_mask_file is not None and os.path.isfile(apod_mask_file):
+        print(f"[transfer function] loading cached apodized mask from {apod_mask_file}")
+        mask_apod = hp.read_map(apod_mask_file, dtype=np.float32)
+    else:
+        mask = hp.read_map(mask_file, dtype=np.float32)
+        mask_apod = nmt.mask_apodization(mask, apod_scale, apod_type)
+        
+        if apod_mask_file is not None:
+            print(f"[transfer function] saving apodized mask to {apod_mask_file}")
+            hp.write_map(apod_mask_file, mask_apod, dtype=np.float32, overwrite=True)
+            
+    bins = nmt.NmtBin.from_nside_linear(nside, delta_ell)
+
+    fsky_eff = mask_apod.mean() ** 2 / np.mean(mask_apod ** 2)
+    print(f"Effective f_sky          : {fsky_eff:.4f}")
 
     bb_sky_all = []
     bb_obs_all = []
@@ -1786,25 +1841,8 @@ def estimate_transfer_function(
 
         print(f"[transfer function] sim {i + 1}/{nsims}")
 
-        cl_sky = estimate_pseudo_cl(
-            maps_sky[i, 0],
-            maps_sky[i, 1],
-            ell_bin,
-            nside,
-            mask_dir,
-            apod_scale=apod_scale,
-            apod_type=apod_type,
-        )
-
-        cl_obs = estimate_pseudo_cl(
-            maps_obs[i, 0],
-            maps_obs[i, 1],
-            ell_bin,
-            nside,
-            mask_dir,
-            apod_scale=apod_scale,
-            apod_type=apod_type,
-        )
+        cl_sky = estimate_pseudo_cl(maps_sky[i, 0], maps_sky[i, 1], mask_apod, bins)
+        cl_obs = estimate_pseudo_cl(maps_obs[i, 0], maps_obs[i, 1], mask_apod, bins)
 
         if ells_eff is None:
             ells_eff = cl_sky["ell"]
@@ -1815,7 +1853,7 @@ def estimate_transfer_function(
         bb_sky_all.append(bb_sky)
         bb_obs_all.append(bb_obs)
 
-        # Individual simulation transfer
+        # Individual simulation transfer.
         ratio_i = np.full_like(bb_sky, np.nan)
 
         good_i = (
@@ -1828,95 +1866,69 @@ def estimate_transfer_function(
 
         ratio_all.append(ratio_i)
 
-
-    # Convert to arrays
+    # Convert to arrays.
     bb_sky_all = np.asarray(bb_sky_all)
     bb_obs_all = np.asarray(bb_obs_all)
     ratio_all = np.asarray(ratio_all)
 
-
-    # Monte Carlo mean spectra
+    # Monte Carlo mean spectra and standard errors.
     mean_bb_sky = np.nanmean(bb_sky_all, axis=0)
     mean_bb_obs = np.nanmean(bb_obs_all, axis=0)
 
+    sky_err = np.nanstd(bb_sky_all, axis=0) / np.sqrt(nsims)
+    obs_err = np.nanstd(bb_obs_all, axis=0) / np.sqrt(nsims)
 
-    # ---------------------------------------------------------
-    # Central transfer function
-    #
-    # T_l = C_l(obs) / C_l(sky)
-    #
-    # Undefined bins (usually low ell) are set to zero
-    # ---------------------------------------------------------
-
-    transfer_bins = np.zeros_like(mean_bb_sky)
+    n_valid_sims = np.sum(np.isfinite(ratio_all), axis=0)
+    transfer_bins = np.full_like(mean_bb_sky, np.nan)
 
     good = (
         np.isfinite(mean_bb_sky)
         & np.isfinite(mean_bb_obs)
-        & (np.abs(mean_bb_sky) > 1e-30)
+        & (np.abs(mean_bb_sky) > snr_thresh * sky_err)
+        & (np.abs(mean_bb_obs) > snr_thresh * obs_err)   # NEW: gate on obs side too
+        & (n_valid_sims >= min_valid_sims)
     )
 
-    transfer_bins[good] = (
-        mean_bb_obs[good] / mean_bb_sky[good]
-    )
-
-    transfer_bins[~good] = 0.0
-
-
+    transfer_bins[good] = mean_bb_obs[good] / mean_bb_sky[good]
+    transfer_bins[good] = np.clip(transfer_bins[good], 0.0, None)
     # ---------------------------------------------------------
-    # Interpolate to every ell
-    # Only use valid bins
+    # Interpolate to every ell, using only the valid bins as anchors.
     # ---------------------------------------------------------
 
     ells_full = np.arange(lmax + 1)
 
-    good_interp = np.isfinite(transfer_bins)
-
     transfer_ell = np.interp(
         ells_full,
-        ells_eff[good_interp],
-        transfer_bins[good_interp],
+        ells_eff[good],
+        transfer_bins[good],
         left=0.0,
-        right=transfer_bins[good_interp][-1],
+        right=transfer_bins[good][-1],
     )
 
+    # ---------------------------------------------------------
+    # Convert to amplitude-level transfer function. 
+    # ---------------------------------------------------------
+    sqrt_transfer_ell = np.sqrt(transfer_ell)
 
     if not return_diagnostics:
-        return transfer_ell
-
+        return sqrt_transfer_ell
 
     diagnostics = {
-
         "ell": ells_eff,
 
         "bb_sky_mean": mean_bb_sky,
         "bb_obs_mean": mean_bb_obs,
+        "bb_sky_err": sky_err,
+        "bb_obs_err": obs_err,
 
-        "bb_sky_err":
-            np.nanstd(bb_sky_all, axis=0) / np.sqrt(nsims),
+        "transfer_ell_power": transfer_ell,
 
-        "bb_obs_err":
-            np.nanstd(bb_obs_all, axis=0) / np.sqrt(nsims),
+        "transfer_bins_mean": np.nanmean(ratio_all, axis=0),
+        "transfer_bins_std": np.nanstd(ratio_all, axis=0),
+        "transfer_bins_err": np.nanstd(ratio_all, axis=0) / np.sqrt(nsims),
 
-
-        # Individual simulation transfer functions
-        "transfer_bins_mean":
-            np.nanmean(ratio_all, axis=0),
-
-        "transfer_bins_std":
-            np.nanstd(ratio_all, axis=0),
-
-        "transfer_bins_err":
-            np.nanstd(ratio_all, axis=0) / np.sqrt(nsims),
-
-        # Which bins have valid transfer estimate
-        "transfer_bins_valid":
-            good,
-
-        # Number of simulations contributing per bin
-        "n_valid_sims":
-            np.sum(np.isfinite(ratio_all), axis=0),
+        "transfer_bins_valid": good,
+        "n_valid_sims": n_valid_sims,
     }
 
-
-    return transfer_ell, diagnostics
+    return sqrt_transfer_ell, diagnostics
