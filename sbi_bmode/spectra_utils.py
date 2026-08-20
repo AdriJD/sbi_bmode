@@ -110,16 +110,14 @@ def get_cmb_spectra(spectra_filepath, lmax):
 
     return out
 
-def get_combined_cmb_spectrum(r_tensor, A_lens, cov_scalar_ell, cov_tensor_ell):
+def get_combined_cmb_spectrum(r_tensor, cov_scalar_ell, cov_tensor_ell):
     '''
-    Given r and A_lens, combine scalar and tensor constributions.
+    Given r, combine scalar and tensor constributions. Here we don't define A_lens as lensing field is treated explicitly in gen_data.
 
     Parameters
     ----------
     r_tensor : float
         Tensor-to-scalar ratio.
-    A_lens : float
-        A_lens parameter.
     cov_scalar_ell : (npol, npol, nell) array
         Scalar cls.
     cov_tensor_ell : (npol, npol, nell) array
@@ -136,7 +134,7 @@ def get_combined_cmb_spectrum(r_tensor, A_lens, cov_scalar_ell, cov_tensor_ell):
     of the TT, TE, EE spectra. 
     '''
 
-    return A_lens * cov_scalar_ell + r_tensor * cov_tensor_ell
+    return cov_scalar_ell + r_tensor * cov_tensor_ell
 
 def get_sed_dust(freq, beta, temp, freq_pivot):
     '''

@@ -112,60 +112,283 @@ def build_preconditioner_pol(A, cinv_pol, ainfo): #Build M = (A^TC^-1A)
     return minv_pol, precond_op
 
 # ---------------------------
-#Generate mixing matrix A.
+# Generate mixing matrix A
 # ---------------------------
 
 def build_A(
     freqs,
-    A_d_BB,
-    alpha_d_BB,
-    beta_dust,
-    amp_beta_dust=None,
-    gamma_beta_dust=None,
-    A_s_BB=None,
-    alpha_s_BB=None,
-    beta_sync=None,
-    amp_beta_sync=None,
-    gamma_beta_sync=None
+    fiducial_beta_dust,
+    fiducial_T_dust,
+    freq_pivot_dust,
+    fiducial_beta_sync=None,
+    freq_pivot_sync=None,
+    default_T_dust=None,
+    include_dust_beta1=False,
+    include_sync_beta1=False,
 ):
     """
-    Build mixing matrix A from draw_data params.
+    Build the fiducial frequency mixing matrix used by reconstruction. 
+
+    Parameters
+    ----------
+    freqs : array-like
+        Observing frequencies in Hz. NOT GHz.
+
+    fiducial_beta_dust : float
+        Dust spectral index assumed by the reconstruction.
+
+    fiducial_T_dust : float or None
+        Dust temperature assumed by the reconstruction in K.
+        If None, use fixed_params["temp_dust"].
+
+    fiducial_beta_sync : float or None
+        Synchrotron spectral index assumed by the reconstruction.
+        If None, synchrotron is not included.
+
+    include_dust_beta1 : bool
+        Include the first-order dust beta-moment column.
+
+    include_sync_beta1 : bool
+        Include the first-order synchrotron beta-moment column.
 
     Returns
     -------
     A : ndarray
-        Mixing matrix with Shape (n_freq, n_comp).
+        Mixing matrix with shape (n_freq, n_comp).
+
+    components : tuple[str]
+        Component names corresponding to the columns of A.
     """
 
-    freqs_ghz = np.asarray(freqs)
-    beta_d = beta_dust
-    beta_s = beta_sync if beta_sync is not None else -3.0
-    Td = 19.6
-    nu0_d = 353.0
-    nu0_s = 23.0
-        
-    include = ["cmb", "dust"]
+    freqs_hz = np.asarray(freqs, dtype=float)
 
-    if amp_beta_dust is not None:
-        include.append("dust_beta1")
-    if beta_sync is not None:
-        include.append("sync")
+    if freqs_hz.ndim != 1:
+        raise ValueError("freqs must be one-dimensional.")
 
-        if amp_beta_sync is not None:
-            include.append("sync_beta1")
+    if np.any(~np.isfinite(freqs_hz)) or np.any(freqs_hz <= 0):
+        raise ValueError("All observing frequencies must be finite and positive.")
 
-    colmap = {
-        "cmb": lambda f: cmb_sed(f),
-        "dust": lambda f: dust_sed(f, beta=beta_d, Td=Td, nu0=nu0_d),
-        "dust_beta1": lambda f: dust_sed_beta1(f, beta=beta_d, Td=Td, nu0=nu0_d),
-        "sync": lambda f: sync_sed(f, beta=beta_s, nu0=nu0_s),
-        "sync_beta1": lambda f: sync_sed_beta1(f, beta=beta_s, nu0=nu0_s),
+   # Fixed normalization conventions, stored internally in Hz
+    freqs_ghz = freqs_hz / 1e9
+    nu0_dust_ghz = float(freq_pivot_dust) / 1e9
+    nu0_sync_ghz = fixed_params["freq_pivot_sync"] / 1e9
+
+    if fiducial_T_dust is None:
+        if default_T_dust is None:
+            raise ValueError(
+                "default_T_dust is required when fiducial_T_dust is None."
+            )
+        T_dust = float(default_T_dust)
+    else:
+        T_dust = float(fiducial_T_dust)
+    
+    beta_dust = float(fiducial_beta_dust)
+    
+    components = ["cmb", "dust"]
+    
+    columns = {
+        "cmb": cmb_sed(freqs_ghz),
+        "dust": dust_sed(
+            freqs_ghz,
+            beta=beta_dust,
+            Td=T_dust,
+            nu0=nu0_dust_ghz,
+        ),
     }
 
-    Acols = [colmap[name](freqs_ghz) for name in include]
-    A = np.vstack(Acols).T
+    if include_dust_beta1:
+        components.append("dust_beta1")
+        columns["dust_beta1"] = dust_sed_beta1(
+            freqs_ghz,
+            beta=beta_dust,
+            Td=T_dust,
+            nu0=nu0_dust_ghz,
+        )
 
-    return A, tuple(include)
+    if fiducial_beta_sync is not None:
+        if freq_pivot_sync is None:
+            raise ValueError(
+                "freq_pivot_sync is required when sync is included."
+            )
+
+        beta_sync = float(fiducial_beta_sync)
+        nu0_sync_ghz = float(freq_pivot_sync) / 1e9
+
+        components.append("sync")
+        columns["sync"] = sync_sed(
+            freqs_ghz,
+            beta=beta_sync,
+            nu0=nu0_sync_ghz,
+        )
+
+        if include_sync_beta1:
+            components.append("sync_beta1")
+            columns["sync_beta1"] = sync_sed_beta1(
+                freqs_ghz,
+                beta=beta_sync,
+                nu0=nu0_sync_ghz,
+            )
+    
+    elif include_sync_beta1:
+        raise ValueError(
+            "include_sync_beta1=True requires fiducial_beta_sync."
+        )
+
+    A = np.column_stack(
+        [np.asarray(columns[name], dtype=float) for name in components]
+    )
+
+    expected_shape = (freqs_hz.size, len(components))
+
+    if A.shape != expected_shape:
+        raise ValueError(
+            f"Unexpected shape {A.shape}; expected {expected_shape}."
+        )
+
+    if not np.all(np.isfinite(A)):
+        raise ValueError("Mixing matrix contains non-finite values.")
+
+    return A
+
+# ---------------------------
+# SED functions
+# ---------------------------
+
+def cmb_sed(freq_ghz):
+    """CMB SED in thermodynamic K_CMB units."""
+    freq_ghz = np.asarray(freq_ghz, dtype=float)
+    return np.ones_like(freq_ghz)
+
+
+def Bnu(nu_hz, T):
+    """Planck blackbody spectral radiance, apart from unit conventions."""
+    h = 6.62607015e-34
+    k = 1.380649e-23
+    c = 299792458.0
+
+    nu_hz = np.asarray(nu_hz, dtype=float)
+
+    if np.any(nu_hz <= 0):
+        raise ValueError("Frequency must be positive.")
+    if T <= 0:
+        raise ValueError("Temperature must be positive.")
+
+    x = h * nu_hz / (k * T)
+
+    return (
+        2.0 * h * nu_hz**3 / c**2
+        / np.expm1(x)
+    )
+
+
+def f_nu(nu_hz):
+    """
+    Frequency-dependent conversion factor from intensity-like units
+    to thermodynamic CMB-temperature units, up to frequency-independent
+    constants that cancel in normalized SED ratios.
+    """
+    h = 6.62607015e-34
+    k = 1.380649e-23
+    Tcmb = 2.7255
+
+    nu_hz = np.asarray(nu_hz, dtype=float)
+
+    if np.any(nu_hz <= 0):
+        raise ValueError("Frequency must be positive.")
+
+    x = h * nu_hz / (k * Tcmb)
+
+    # Equivalent to (exp(x) - 1)^2 / (x^2 exp(x)),
+    # but numerically somewhat clearer.
+    return np.expm1(x)**2 / (x**2 * np.exp(x))
+
+
+def mu_dust(freq_ghz, beta=1.5, Td=19.6):
+    """
+    Unnormalized dust SED.
+
+    Input frequencies are in GHz. Frequencies passed to the Planck
+    function and unit-conversion factor are converted to Hz.
+    """
+    freq_ghz = np.asarray(freq_ghz, dtype=float)
+    nu_hz = freq_ghz * 1e9
+
+    return (
+        freq_ghz ** (beta - 2.0)
+        * Bnu(nu_hz, Td)
+        * f_nu(nu_hz)
+    )
+
+
+def dust_sed(freq_ghz, beta=1.5, Td=19.6, nu0=353.0):
+    """
+    Dust SED normalized to unity at nu0.
+    """
+    return (
+        mu_dust(freq_ghz, beta=beta, Td=Td)
+        / mu_dust(nu0, beta=beta, Td=Td)
+    )
+
+
+def dust_sed_beta1(freq_ghz, beta=1.5, Td=19.6, nu0=353.0):
+    """
+    First derivative of the normalized dust SED with respect to beta.
+    """
+    sed = dust_sed(
+        freq_ghz,
+        beta=beta,
+        Td=Td,
+        nu0=nu0,
+    )
+
+    freq_ghz = np.asarray(freq_ghz, dtype=float)
+
+    return sed * np.log(freq_ghz / float(nu0))
+
+
+# ---------------------------
+# Synchrotron SED
+# ---------------------------
+
+def omega_sync(freq_ghz, beta=-3.0):
+    """
+    Unnormalized synchrotron SED.
+
+    The power-law frequency can be expressed in GHz because the
+    normalization ratio removes the associated constant. f_nu,
+    however, must receive frequency in Hz.
+    """
+    freq_ghz = np.asarray(freq_ghz, dtype=float)
+    nu_hz = freq_ghz * 1e9
+
+    return (
+        freq_ghz**beta
+        * f_nu(nu_hz)
+    )
+
+
+def sync_sed(freq_ghz, beta=-3.0, nu0=23.0):
+    """Synchrotron SED normalized to unity at nu0."""
+    return (
+        omega_sync(freq_ghz, beta=beta)
+        / omega_sync(nu0, beta=beta)
+    )
+
+
+def sync_sed_beta1(freq_ghz, beta=-3.0, nu0=23.0):
+    """
+    First derivative of the normalized synchrotron SED with respect
+    to beta.
+    """
+    sed = sync_sed(
+        freq_ghz,
+        beta=beta,
+        nu0=nu0,
+    )
+
+    freq_ghz = np.asarray(freq_ghz, dtype=float)
+
+    return sed * np.log(freq_ghz / float(nu0))
 
 #Define a operator
 class Op:
@@ -318,101 +541,88 @@ def make_normal_operator(mixing_operator, cinv_pol, ainfo):
     return normal_op
     
 # ---------------------------
-#Define sed functions to be used by mixing matrix:
-# ---------------------------
-
-# --- CMB SED (in K_CMB units it's flat)
-def cmb_sed(freq_ghz):
-    return np.ones_like(freq_ghz, dtype=float)
-
-
-# --- Generic
-def Bnu(nu_hz, T):
-    h = 6.62607015e-34
-    k = 1.380649e-23
-    c = 299792458.0
-    Tcmb = 2.7255  # K
-    x = h * nu_hz / (k * T)
-    return (2.0 * h * nu_hz**3 / c**2) / np.expm1(x)
-
-def f_nu(nu_hz):
-    # intensity -> uK_CMB: (dBv/dT | Tcmb)^-1  (up to constant factor)
-    h = 6.62607015e-34
-    k = 1.380649e-23
-    c = 299792458.0
-    Tcmb = 2.7255  # K
-    x = h * nu_hz / (k * Tcmb)
-    ex = np.exp(x)
-    return ((ex - 1.0) / x) ** 2 / ex
-
-def mu_dust(freq_ghz, beta=1.5, Td=19.6):
-    nu = np.asarray(freq_ghz, float)
-    return (nu ** (beta - 2.0)) * Bnu(nu, Td) * f_nu(nu)
-
-def dust_sed(freq_ghz, beta=1.5, Td=19.6, nu0=353.0):
-    return mu_dust(freq_ghz, beta, Td) / mu_dust(nu0, beta, Td)
-
-def dust_sed_beta1(freq_ghz, beta=1.5, Td=19.6, nu0=353.0):
-    """
-    First moment basis in frequency space:
-      d/d beta [ dust_sed ].
-    For normalized SED A(nu)=mu(nu)/mu(nu0):
-      dA/dβ = A * ( d ln mu(nu)/dβ - d ln mu(nu0)/dβ )
-    Here mu_dust ∝ nu^(β-2) * Bnu * f_nu, so only nu^(β-2) depends on β:
-      d ln mu / dβ = ln(nu_hz)
-    Thus:
-      dA/dβ = A * ln(nu/nu0)
-    (with nu and nu0 in the same units, GHz is fine)
-    """
-    A = dust_sed(freq_ghz, beta=beta, Td=Td, nu0=nu0)
-    nu = np.asarray(freq_ghz, float)
-    return A * np.log(nu / float(nu0))
-
-# ---------------------------
-#Sync SED + first moment wrt beta_s
-# ---------------------------
-
-def omega_sync(freq_ghz, beta=-3.0):
-    nu = np.asarray(freq_ghz, float)
-    return (nu ** beta) * f_nu(nu)
-
-def sync_sed(freq_ghz, beta=-3.0, nu0=23.0):
-    return omega_sync(freq_ghz, beta) / omega_sync(nu0, beta)
-
-def sync_sed_beta1(freq_ghz, beta=-3.0, nu0=23.0):
-    """
-    d/d beta [ sync_sed ].
-    For normalized A(nu)=omega(nu)/omega(nu0) and omega ∝ nu^β * f_nu,
-    only nu^β depends on β, so:
-      dA/dβ = A * ln(nu/nu0)
-    """
-    A = sync_sed(freq_ghz, beta=beta, nu0=nu0)
-    nu = np.asarray(freq_ghz, float)
-    return A * np.log(nu / float(nu0))
-
-# ---------------------------
 #Generate deflection field from lensing file PP col. 
+#Also a function to draw constraint phi from the file.
 #Check if this file make sense.
 # ---------------------------
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 LENSPOTENTIAL_CLS = DATA_DIR / "planck_2018_lenspotentialCls.dat"
 
+def generate_defl(lmax_len, nside, seed=None, dlmax=500, epsilon=1e-6):
+    """Draw an unconstrained Gaussian phi realization and convert it to deflection."""
 
-def generate_defl(lmax_len, nside, seed, dlmax=500, epsilon=1e-6):
+    lmax_phi = int(lmax_len + dlmax)
+
     if seed is not None:
         np.random.seed(int(seed))
-    #Path and files
-    lmax_unl = int(lmax_len + dlmax)
-    cl_unl = camb_clfile(str(LENSPOTENTIAL_CLS))
-    plm = synalm(cl_unl["pp"], lmax=lmax_unl, mmax=lmax_unl)
 
-    ell = np.arange(lmax_unl + 1)
-    dlm_grad = almxfl(plm, np.sqrt(ell * (ell + 1.0)), None, False)
+    cl_phi = camb_clfile(str(LENSPOTENTIAL_CLS))["pp"]
+    phi_alm = synalm(cl_phi, lmax=lmax_phi, mmax=lmax_phi)
+
+    defl = phi_alm_to_defl(phi_alm, nside=nside, lmax=lmax_phi, epsilon=epsilon)
+
+    return defl, phi_alm
+
+
+def draw_constrained_phi(phi_obs_alm, S_l, N_l, lmax=None, seed=None):
+    """Draw phi ~ P(phi | phi_obs) for phi_obs = phi + noise."""
+
+    S_l = np.asarray(S_l, dtype=float)
+    N_l = np.asarray(N_l, dtype=float)
+
+    if lmax is None:
+        lmax = min(len(S_l), len(N_l)) - 1
+
+    S_l = S_l[:lmax + 1]
+    N_l = N_l[:lmax + 1]
+
+    invS = np.zeros_like(S_l)
+    invN = np.zeros_like(N_l)
+    sqrtInvS = np.zeros_like(S_l)
+    sqrtInvN = np.zeros_like(N_l)
+
+    np.divide(1.0, S_l, out=invS, where=S_l > 0)
+    np.divide(1.0, N_l, out=invN, where=N_l > 0)
+    np.divide(1.0, np.sqrt(S_l), out=sqrtInvS, where=S_l > 0)
+    np.divide(1.0, np.sqrt(N_l), out=sqrtInvN, where=N_l > 0)
+
+    post = np.zeros_like(S_l)
+    den = invS + invN
+    np.divide(1.0, den, out=post, where=den > 0)
+
+    f_wiener = post * invN
+    f_s = post * sqrtInvS
+    f_n = post * sqrtInvN
+
+    phi_wf_alm = hp.almxfl(phi_obs_alm, f_wiener, inplace=False)
+
+    if seed is not None:
+        np.random.seed(int(seed))
+
+    zeta_s_alm = hp.synalm(np.ones(lmax + 1), lmax=lmax, new=True)
+    zeta_n_alm = hp.synalm(np.ones(lmax + 1), lmax=lmax, new=True)
+
+    residual_alm = hp.almxfl(zeta_s_alm, f_s, inplace=False) + hp.almxfl(zeta_n_alm, f_n, inplace=False)
+    phi_cr_alm = phi_wf_alm + residual_alm
+
+    return phi_cr_alm, phi_wf_alm, residual_alm
+
+
+def phi_alm_to_defl(phi_alm, nside, lmax=None, epsilon=1e-6):
+    """Convert phi alm to the gradient deflection field used by lenspyx."""
+
+    if lmax is None:
+        lmax = hp.Alm.getlmax(len(phi_alm))
+
+    ell = np.arange(lmax + 1)
+    dlm_grad = hp.almxfl(phi_alm, np.sqrt(ell * (ell + 1.0)), inplace=False)
 
     geom = lensing.get_geom(("healpix", {"nside": int(nside)}))
     defl = lenspyx.remapping.deflection(geom, dlm_grad, None, epsilon=epsilon)
+
     return defl
+    
 
 class CGComponentReconstructor:
     def __init__(self, bin_size=20, cg_maxiter=500, cg_tol=1e-12):
@@ -435,6 +645,8 @@ class CGComponentReconstructor:
         out = np.zeros((nsplit, ncomp, 2, nalm), dtype=np.complex128)
 
         for s in range(nsplit):
+            print(f"\nStarting CG split {s + 1}/{nsplit}", flush=True)
+            
             dpol = d_alm_obs[s]
 
             _, _, cinv_pol = compute_cinv_pol(
@@ -452,12 +664,35 @@ class CGComponentReconstructor:
                 M=precond,
                 dot=contract_almxblm,
             )
+            converged = False
 
-            for _ in range(self.cg_maxiter):
+            for iteration in range(1, self.cg_maxiter+1):
                 cg.step()
+                print(
+                    f"split {s + 1}/{nsplit}, "
+                    f"iteration {iteration:4d}, "
+                    f"error = {cg.err:.6e}",
+                    flush=True,
+                )
+                
                 if cg.err < self.cg_tol:
+                    converged = True
+                    print(
+                        f"CG split {s + 1}/{nsplit} converged "
+                        f"after {iteration} iterations: "
+                        f"error = {cg.err:.6e}",
+                        flush=True,
+                    )
                     break
-
+                    
+            if not converged:
+                print(
+                    f"CG split {s + 1}/{nsplit} did not converge "
+                    f"after {self.cg_maxiter} iterations: "
+                    f"final error = {cg.err:.6e}",
+                    flush=True,
+                )
+            
             out[s] = cg.x
 
         return out
