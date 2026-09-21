@@ -1,9 +1,10 @@
+import os
 import numpy as np
 from sbi_bmode import sim_utils, script_utils
 import yaml
 import matplotlib.pyplot as plt
 
-with open('/u/bing/sbi_bmode/scripts/configs/config_transfer_2.yaml') as f:
+with open('/u/bing/sbi_bmode/scripts/configs/config_compute_transfer_4.yaml') as f:
     config = yaml.safe_load(f)
 
 data_dict, fixed_params_dict, params_dict, observation_dict, transfer_dict = \
@@ -12,7 +13,8 @@ data_dict, fixed_params_dict, params_dict, observation_dict, transfer_dict = \
 true_params = script_utils.get_true_params(params_dict)
 
 specdir = '/u/bing/sbi_bmode/data'
-figdir = "/u/bing/sbi_bmode/binh/figures"
+figdir = "/ptmp/bing/sbi_bmode_storage/figures/compute_transfer_4"
+os.makedirs(figdir, exist_ok=True)
 nsims = transfer_dict['nsims']
 
 # ------------------------------------------------------------------
@@ -37,8 +39,14 @@ sim_obs = sim_utils.CMBSimulator(
 
 fidx = sim_sky.freq_strings.index(observation_dict['obsmat_freq'])
 
-maps_sky = np.zeros((nsims, 2, sim_sky.minfo.npix))
-maps_obs = np.zeros((nsims, 2, sim_obs.minfo.npix))
+nsplit = data_dict['nsplit']
+assert nsplit == 2, (
+    "estimate_transfer_function only supports nsplit == 2 "
+    f"(got nsplit={nsplit})"
+)
+
+maps_sky = np.zeros((nsims, nsplit, 2, sim_sky.minfo.npix))
+maps_obs = np.zeros((nsims, nsplit, 2, sim_obs.minfo.npix))
 
 for i in range(nsims):
     out_sky = sim_sky.draw_data(
@@ -53,31 +61,33 @@ for i in range(nsims):
         return_maps=True,
     )
 
-    maps_sky[i] = out_sky["obs_map"][0, fidx]
-    maps_obs[i] = out_obs["obs_map"][0, fidx]
+    maps_sky[i] = out_sky["obs_map"][:, fidx]   # (nsplit, 2, npix)
+    maps_obs[i] = out_obs["obs_map"][:, fidx]
 
 # ------------------------------------------------------------------
 # Estimate transfer function
 # ------------------------------------------------------------------
 
-transfer_ell, diag = sim_utils.estimate_transfer_function(
+sqrt_transfer_ell, diag = sim_utils.estimate_transfer_function(
     maps_sky,
     maps_obs,
-    ell_bin=transfer_dict['ell_bin'],
+    delta_ell=transfer_dict['ell_bin'],
     nside=data_dict['nside'],
     lmax=data_dict['lmax'],
-    mask_dir=transfer_dict['mask_file'],
+    mask_file=transfer_dict['mask_file'],
+    apod_mask_file=transfer_dict.get('apod_mask_file'),
     apod_scale=transfer_dict['apod_scale'],
     apod_type=transfer_dict['apod_type'],
     return_diagnostics=True,
 )
 
 out_path = f"{specdir}/{transfer_dict['output_file']}"
-np.save(out_path, transfer_ell)
+np.save(out_path, sqrt_transfer_ell)
 
-print(f"Saved transfer function to {out_path}")
+print(f"Saved amplitude-level transfer function to {out_path}")
+
 # ------------------------------------------------------------------
-# Plot 1 : Transfer function (binned)
+# Plot 1 : Transfer function (binned, power-space)
 # ------------------------------------------------------------------
 
 plt.figure(figsize=(7,5))
@@ -105,14 +115,13 @@ plt.xlim(1, 200)
 plt.ylim(-0.05, 1)
 
 plt.xlabel(r"$\ell$")
-plt.ylabel(r"$T_\ell$")
-plt.title("Transfer Function")
+plt.ylabel(r"$T_\ell$ (power)")
+plt.title("Transfer Function (power-space, binned)")
 plt.grid(alpha=0.3)
 plt.legend()
 
 plt.tight_layout()
 plt.savefig(f"{figdir}/transfer_function_binned.png", dpi=200)
-
 
 
 # ------------------------------------------------------------------
@@ -140,7 +149,6 @@ plt.errorbar(
 )
 
 plt.yscale("log")
-
 plt.xlim(0, 200)
 
 plt.xlabel(r"$\ell$")
@@ -153,27 +161,24 @@ plt.tight_layout()
 plt.savefig(f"{figdir}/bb_spectra.png", dpi=200)
 
 
-
 # ------------------------------------------------------------------
-# Plot 3 : Full transfer function
+# Plot 3 : Full interpolated transfer function (amplitude vs power)
 # ------------------------------------------------------------------
 
-ells = np.arange(len(transfer_ell))
+ells = np.arange(len(sqrt_transfer_ell))
 
-plt.figure(figsize=(7,5))
+fig, ax1 = plt.subplots(figsize=(7,5))
 
-plt.plot(
-    ells,
-    transfer_ell,
-    lw=2,
-)
+ax1.plot(ells, sqrt_transfer_ell, lw=2, color="C0", label=r"amplitude, $\sqrt{T_\ell}$")
+ax1.plot(ells, diag["transfer_ell_power"], lw=2, ls="--", color="C1", label=r"power, $T_\ell$")
 
-plt.xlim(0, 200)
-plt.ylim(-0.05, 1)
-plt.xlabel(r"$\ell$")
-plt.ylabel(r"$T_\ell$")
-plt.title("Interpolated Transfer Function")
-plt.grid(alpha=0.3)
+ax1.set_xlim(0, 200)
+ax1.set_ylim(-0.05, 1)
+ax1.set_xlabel(r"$\ell$")
+ax1.set_ylabel(r"$T_\ell$")
+ax1.set_title("Interpolated Transfer Function")
+ax1.grid(alpha=0.3)
+ax1.legend()
 
 plt.tight_layout()
 plt.savefig(f"{figdir}/transfer_function_full.png", dpi=200)
