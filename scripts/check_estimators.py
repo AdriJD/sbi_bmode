@@ -2,12 +2,15 @@ import os
 import yaml
 import pickle
 import argparse
+import json
+
 import signal
 from contextlib import contextmanager
 
 import numpy as np
 import matplotlib.pyplot as plt
 import torch
+from torch.optim import Adam
 from torch.distributions import Normal, HalfNormal
 from sbi.inference import SNPE, simulate_for_sbi, FMPE
 from sbi.utils.sbiutils import seed_all_backends
@@ -50,6 +53,27 @@ def timeout(seconds):
         # Cancel the alarm and restore original handler.
         signal.alarm(0)
         signal.signal(signal.SIGALRM, original_handler)
+
+def warm_start_from_state_dict(inference, theta, x, state_dict_path, learning_rate):
+    '''
+    Warm-start `inference`'s density estimator from a saved state_dict, then
+    stage it to resume training at `learning_rate`.
+
+    Must be called AFTER `inference.append_simulations(theta, x, proposal=...)`
+    and BEFORE the real `inference.train(..., resume_training=True)` call.
+    '''
+    inference.train(training_batch_size=200, learning_rate=learning_rate,
+                     max_num_epochs=1, stop_after_epochs=10**6,
+                     show_train_summary=False)
+
+    state_dict = torch.load(state_dict_path, map_location='cpu')
+    inference._neural_net.load_state_dict(state_dict)
+
+    inference.optimizer = Adam(inference._neural_net.parameters(), lr=learning_rate)
+    inference.epoch = 0
+    inference._val_loss = float('inf')
+
+    return inference
 
 def plot_training(opath, training_loss, validation_loss):
     '''
@@ -193,22 +217,45 @@ def get_study_results(study):
 
     return results
 
-def save_results(opath, study):
-    '''
-    Save the ordered optuna results in a text file.
-
-    Parameters
-    ----------
-    opath : str
-        Path to output file.
-    study : optuna.study object
-        The study to be summarized.
-    '''
-
+def save_results(opath, study, odir_base, finetune=False, arch_params=None,
+                  density_estimator_type='maf'):
     os.makedirs(os.path.dirname(opath), exist_ok=True)
 
     results = get_study_results(study)
     results = sorted(results, key=lambda d: d['loss'])
+
+    best = results[0]
+    best_trial_dir = opj(odir_base, f'trial_{best["trial_number"]:04d}')
+
+    if finetune:
+        assert arch_params is not None, 'finetune=True requires arch_params'
+        best_arch = dict(arch_params)
+    else:
+        best_arch = {
+            'hidden_features': best['params']['hidden_features'],
+            'num_transforms': best['params']['num_transforms'],
+            'num_blocks': best['params']['num_blocks'],
+            'density_estimator_type': density_estimator_type,
+        }
+
+    arch_path = opj(odir_base, 'best_arch.json')
+    with open(arch_path, 'w') as fh:
+        json.dump(best_arch, fh, indent=2)
+
+    best_state_dict_src = opj(best_trial_dir, 'net_state_dict.pt')
+    best_state_dict_dst = opj(odir_base, 'best_net_state_dict.pt')
+    if os.path.exists(best_state_dict_src):
+        import shutil
+        shutil.copy2(best_state_dict_src, best_state_dict_dst)
+        print(f'Best net_state_dict copied to {best_state_dict_dst}')
+    else:
+        print(f'WARNING: no net_state_dict.pt found at {best_state_dict_src}')
+
+    print(f'Best architecture saved to {arch_path}')
+    print(f'Best trial: {best["trial_number"]}')
+    print(f'Best loss: {best["loss"]}')
+    print(f'Architecture: {best_arch}')
+
     param_names = results[0]['params'].keys()
 
     mat2save = np.zeros((len(results), 2 + len(param_names)), dtype=object)
@@ -237,7 +284,9 @@ def main(path_params, path_data, path_data_obs, odir, imgdir, config, n_samples,
          num_atoms=10, training_batch_size=200, learning_rate=0.0005, clip_max_norm=5.0,
          hidden_features=50, num_transforms=3,
          embed=False, embed_num_layers=2, embed_num_out=25, embed_num_hiddens=25, density_estimator_type='maf',
-         num_blocks=2, dropout_probability=0., use_batch_norm=False, e_moped=False, cosmo_only=False, nsims=None):
+         num_blocks=2, dropout_probability=0., use_batch_norm=False, e_moped=False, cosmo_only=False, nsims=None,
+         pretrained_state_dict=None,                 
+        ):
     '''
     Run density estimation.
 
@@ -336,17 +385,29 @@ def main(path_params, path_data, path_data_obs, odir, imgdir, config, n_samples,
                                     num_block=num_blocks, dropout_probability=dropout_probability,
                                     use_batch_norm=use_batch_norm,
                                     embedding_net=embedding_net)
+    
     inference = SNPE(prior, density_estimator=neural_posterior)
 
     proposal = prior
-    density_estimator = inference.append_simulations(
-        theta, x, proposal=proposal).train(
-            num_atoms=num_atoms, training_batch_size=training_batch_size,
-            learning_rate=learning_rate, clip_max_norm=clip_max_norm,
-            validation_fraction=0.1, stop_after_epochs=30,
-            #validation_fraction=0.1, stop_after_epochs=300,
-            max_num_epochs=1000, use_combined_loss=True,
-            show_train_summary=False)
+    inference.append_simulations(theta, x, proposal=proposal)
+
+    if pretrained_state_dict is not None:
+        inference = warm_start_from_state_dict(
+            inference, theta, x, pretrained_state_dict, learning_rate)
+        print(f'{comm.rank=}: warm-started density estimator from {pretrained_state_dict}')
+
+    density_estimator = inference.train(
+        num_atoms=num_atoms,
+        training_batch_size=training_batch_size,
+        learning_rate=learning_rate,
+        clip_max_norm=clip_max_norm,
+        validation_fraction=0.1,
+        stop_after_epochs=30,
+        max_num_epochs=1000,
+        use_combined_loss=True,
+        show_train_summary=False,
+        resume_training=pretrained_state_dict is not None,
+    )
 
     # Get validation loss for optuna.
     best_validation_loss = float(inference.summary['validation_loss'][-1])
@@ -376,10 +437,16 @@ def main(path_params, path_data, path_data_obs, odir, imgdir, config, n_samples,
     with open(opj(odir, 'posterior.pkl'), "wb") as handle:
         pickle.dump(posterior, handle)
 
+    with open(opj(odir, 'posterior.pkl'), "wb") as handle:
+        pickle.dump(posterior, handle)
+
+    torch.save(inference._neural_net.state_dict(), opj(odir, 'net_state_dict.pt')) 
+
     return best_validation_loss
 
 def run_optuna(trial, path_params, path_data, path_data_obs, odir_base, config, n_samples,
-               cosmo_only=False, nsims=None):
+               cosmo_only=False, nsims=None,
+               finetune=False, pretrained_state_dict=None, arch_params=None): 
     '''
     Run one trial for the optimizer.
 
@@ -418,11 +485,16 @@ def run_optuna(trial, path_params, path_data, path_data_obs, odir_base, config, 
     learning_rate = trial.suggest_float("learning_rate", 1e-6, 1e-2, log=True)
     #clip_max_norm = trial.suggest_float("clip_max_norm", 1, 10)
     clip_max_norm = 6
-    hidden_features = trial.suggest_int("hidden_features", 10, 100)
-    num_transforms = trial.suggest_int("num_transforms", 3, 13)
-    #density_estimator_type = trial.suggest_categorical(
-    #    "estimator_type", ['maf', 'nsf'])
-    num_blocks = trial.suggest_int("num_blocks", 1, 7)
+    if finetune:
+        hidden_features = arch_params['hidden_features']
+        num_transforms = arch_params['num_transforms']
+        num_blocks = arch_params['num_blocks']
+        density_estimator_type = arch_params.get('density_estimator_type', 'maf')
+    else:
+        hidden_features = trial.suggest_int("hidden_features", 10, 100)
+        num_transforms = trial.suggest_int("num_transforms", 3, 13)
+        num_blocks = trial.suggest_int("num_blocks", 1, 7)
+        density_estimator_type = 'maf'
     #dropout_probability = trial.suggest_float("dropout_probability",
     #                                          0., 0.5, step=0.5)
     dropout_probability = 0.0
@@ -451,12 +523,12 @@ def run_optuna(trial, path_params, path_data, path_data_obs, odir_base, config, 
                 learning_rate=learning_rate, training_batch_size=2 ** training_batch_size,
                 clip_max_norm=clip_max_norm, hidden_features=hidden_features,
                 num_transforms=num_transforms, num_blocks=num_blocks,
+                density_estimator_type=density_estimator_type,         
                 dropout_probability=dropout_probability, use_batch_norm=use_batch_norm,
                 embed=embed,
                 embed_num_layers=embed_num_layers, embed_num_out=embed_num_out,
                 embed_num_hiddens=embed_num_hiddens, e_moped=e_moped, cosmo_only=cosmo_only,
-                nsims=nsims)
-
+                nsims=nsims, pretrained_state_dict=pretrained_state_dict) 
     
     # Save trial parameters.
     trial_data = {'loss' : loss, 'trial_number' : trial.number, 'params' : trial.params}
@@ -480,7 +552,18 @@ if __name__ == '__main__':
     parser.add_argument('--cosmo-only', action='store_true', help="Posterior of only r and Alens")
     parser.add_argument('--n-trials', type=int, default=144, help="Number of trials")
     parser.add_argument('--nsims', type=int, help="Set (max) number of sims used for training")
-
+    parser.add_argument('--finetune', action='store_true',
+                        help="Fine-tuning mode: freeze architecture (from --arch-json), "
+                             "only search learning_rate, warm-start weights from "
+                             "--pretrained-state-dict.")
+    parser.add_argument('--pretrained-state-dict', type=str, default=None,
+                        help="Path to a .pt state_dict, e.g. best_net_state_dict.pt "
+                             "written by save_results() from a prior optuna study.")
+    parser.add_argument('--arch-json', type=str, default=None,
+                        help="Path to a JSON file with the frozen architecture, e.g. "
+                             "best_arch.json written by save_results() from a prior "
+                             "optuna study. Required with --finetune.")
+    
     args = parser.parse_args()
 
     if comm.rank == 0:
@@ -496,10 +579,22 @@ if __name__ == '__main__':
 
     storage = optuna.storages.JournalStorage(
         optuna.storages.journal.JournalFileBackend(args.journal))
+    
+    arch_params = None
+    if args.finetune:
+        assert args.pretrained_state_dict is not None, "--finetune requires --pretrained-state-dict"
+        assert args.arch_json is not None, "--finetune requires --arch-json"
+        with open(args.arch_json, 'r') as fh:
+            arch_params = json.load(fh)
 
-    objective = lambda trial: run_optuna(trial, args.params, args.data, args.data_obs,
-                                         args.odir, config, args.n_samples, args.cosmo_only,
-                                         nsims=args.nsims)
+    objective = lambda trial: run_optuna(
+        trial, args.params, args.data, args.data_obs,
+        args.odir, config, args.n_samples, args.cosmo_only,
+        nsims=args.nsims, finetune=args.finetune,
+        pretrained_state_dict=args.pretrained_state_dict,
+        arch_params=arch_params,
+    )
+    
     sampler = optuna.samplers.TPESampler(multivariate=True)
     study = optuna.create_study(study_name='test_study', storage=storage, direction="minimize", load_if_exists=True)
 
@@ -520,34 +615,46 @@ if __name__ == '__main__':
 
     comm.barrier()
     if comm.rank == 0:
-
         os.makedirs(opj(args.odir, 'img'), exist_ok=True)
 
-        ax = oplt.plot_optimization_history(study)
-        fig = get_figure_from_ax(ax)
-        fig.set_constrained_layout(True)
-        fig.savefig(opj(args.odir, 'img', 'optimization_history'), dpi=300)
-        plt.close(fig)
+        try:
+            ax = oplt.plot_optimization_history(study)
+            fig = get_figure_from_ax(ax)
+            fig.set_constrained_layout(True)
+            fig.savefig(opj(args.odir, 'img', 'optimization_history'), dpi=300)
+            plt.close(fig)
+        except Exception as e:
+            print(f'WARNING: plot_optimization_history failed: {e}')
 
-        ax = oplt.plot_param_importances(study)
-        fig = get_figure_from_ax(ax)
-        fig.set_constrained_layout(True)
-        fig.savefig(opj(args.odir, 'img', 'param_importance'), dpi=300)
-        plt.close(fig)
+        try:
+            ax = oplt.plot_param_importances(study)
+            fig = get_figure_from_ax(ax)
+            fig.set_constrained_layout(True)
+            fig.savefig(opj(args.odir, 'img', 'param_importance'), dpi=300)
+            plt.close(fig)
+        except Exception as e:
+            print(f'WARNING: plot_param_importances failed: {e}')
 
-        ax = oplt.plot_slice(study)
-        fig = get_figure_from_ax(ax)
-        fig.set_constrained_layout(True)
-        fig.savefig(opj(args.odir, 'img', 'slice'), dpi=300)
-        plt.close(fig)
+        if not args.finetune:
+            try:
+                ax = oplt.plot_slice(study)
+                fig = get_figure_from_ax(ax)
+                fig.set_constrained_layout(True)
+                fig.savefig(opj(args.odir, 'img', 'slice'), dpi=300)
+                plt.close(fig)
+            except Exception as e:
+                print(f'WARNING: plot_slice failed: {e}')
 
-        ax = oplt.plot_contour(study)
-        fig = get_figure_from_ax(ax)
-        fig.set_size_inches(18, 16)
-        fig.set_constrained_layout(True)        
-        fig.savefig(opj(args.odir, 'img', 'contour'), dpi=300)
-        plt.close(fig)
+            try:
+                ax = oplt.plot_contour(study)
+                fig = get_figure_from_ax(ax)
+                fig.set_size_inches(18, 16)
+                fig.set_constrained_layout(True)
+                fig.savefig(opj(args.odir, 'img', 'contour'), dpi=300)
+                plt.close(fig)
+            except Exception as e:
+                print(f'WARNING: plot_contour failed: {e}')
 
-        save_results(opj(args.odir, 'img', 'results.txt'), study)
-
+        save_results(opj(args.odir, 'img', 'results.txt'), study, args.odir,
+                     finetune=args.finetune, arch_params=arch_params)
         
