@@ -1,0 +1,28 @@
+#!/bin/bash
+#SBATCH --job-name=test_shared_obsmat
+#SBATCH --nodes=1
+#SBATCH --ntasks-per-node=32
+#SBATCH --cpus-per-task=1
+#SBATCH --ntasks-per-core=1
+#SBATCH --time=00:10:00
+#SBATCH --mail-type=ALL
+#SBATCH --mail-user=yenbinhpy308@gmail.com
+#SBATCH --mem=64G
+
+source /mpcdf/modules/init/sh
+module purge
+module load gcc/16
+module load impi/2021.18
+
+export LD_LIBRARY_PATH="$I_MPI_ROOT/lib:$I_MPI_ROOT/opt/mpi/libfabric/lib:$HOME/local/lib:$LD_LIBRARY_PATH"
+export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
+
+source /u/bing/sbi_bmode/.venv/bin/activate
+
+export TEST_OBSMAT_DIR=/u/bing/so-data/mss2
+export TEST_OBSMAT_FREQ=f090
+export TEST_OBSMAT_TAG=RC1.r01
+export TEST_OBSMAT_RELEASE=mss2
+
+srun -u --cpu-bind=cores -c $SLURM_CPUS_PER_TASK \
+    python /u/bing/sbi_bmode/scripts/check_mpi_shared_mem.py

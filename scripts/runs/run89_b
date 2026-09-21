@@ -1,10 +1,10 @@
 #!/bin/bash
-#SBATCH --job-name=run89_obsmat
+#SBATCH --job-name=run89_b
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=128
 #SBATCH --cpus-per-task=1
 #SBATCH --ntasks-per-core=1
-#SBATCH --time=01:30:00
+#SBATCH --time=01:59:00
 #SBATCH --mail-type=ALL
 #SBATCH --mail-user=yenbinhpy308@gmail.com
 
@@ -19,7 +19,7 @@ export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
 
 source /u/bing/sbi_bmode/.venv/bin/activate
 
-TAG=run89
+TAG=run89_b
 ANADIR=/u/bing/sbi_bmode/scripts
 ODIR=/ptmp/bing/2026_sbi_bmode/${TAG}
 SPECDIR=/u/bing/sbi_bmode/data
@@ -28,7 +28,7 @@ PYILCDIR=/u/bing/local/pyilc
 
 mkdir -p ${ODIR}
 
-CONFIG=${CONFIGDIR}/config_run_obsmat01.yaml
+CONFIG=${CONFIGDIR}/config_run_obsmat03.yaml
 
 export JAX_ENABLE_X64=True
 export JAX_DEBUG_NANS=True

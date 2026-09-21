@@ -1,0 +1,42 @@
+#!/bin/bash
+#SBATCH --job-name=tarp91hf_a
+#SBATCH --nodes=1
+#SBATCH --ntasks-per-node=1
+#SBATCH --cpus-per-task=1
+#SBATCH --ntasks-per-core=1
+#SBATCH --time=00:30:00
+#SBATCH --mem=16GB
+#SBATCH --mail-type=ALL
+#SBATCH --mail-user=yenbinhpy308@gmail.com
+
+source /mpcdf/modules/init/sh
+
+module purge
+module load gcc/16
+module load impi/2021.18
+
+export LD_LIBRARY_PATH="$I_MPI_ROOT/lib:$I_MPI_ROOT/opt/mpi/libfabric/lib:$HOME/local/lib:$LD_LIBRARY_PATH"
+export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
+
+source /u/bing/sbi_bmode/.venv/bin/activate
+
+TAG=tarp91hf_a
+ANADIR=/u/bing/sbi_bmode/scripts
+ODIR=/ptmp/bing/2026_sbi_bmode/${TAG}
+
+TESTDIR=/ptmp/bing/2026_sbi_bmode/run89t_obsmat_g
+SAMPLEDIR=/ptmp/bing/2026_sbi_bmode/sample91hf_a
+SAMPLES=${SAMPLEDIR}/samples_test.npy
+SEED=20
+TEST_PARAMS=${TESTDIR}/param_draws_test.npy
+
+srun -u \
+    --cpu-bind=cores \
+    -c $SLURM_CPUS_PER_TASK \
+    python ${ANADIR}/run_coverage_tarp_bootstrap.py \
+    --odir ${ODIR} \
+    --samples ${SAMPLES} \
+    --test-params ${TEST_PARAMS} \
+    --seed ${SEED}
+    
+cp ./slurm-${SLURM_JOB_ID}.out ${ODIR}/

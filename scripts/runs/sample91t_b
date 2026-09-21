@@ -1,0 +1,57 @@
+#!/bin/bash
+#SBATCH --job-name=sample91t_a
+#SBATCH --nodes=1
+#SBATCH --ntasks-per-node=72
+#SBATCH --cpus-per-task=1
+#SBATCH --ntasks-per-core=1
+#SBATCH --time=00:30:00
+#SBATCH --mail-type=ALL
+#SBATCH --mail-user=yenbinhpy308@gmail.com
+
+source /mpcdf/modules/init/sh
+
+module purge
+module load gcc/16
+module load impi/2021.18
+
+export LD_LIBRARY_PATH="$I_MPI_ROOT/lib:$I_MPI_ROOT/opt/mpi/libfabric/lib:$HOME/local/lib:$LD_LIBRARY_PATH"
+export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
+
+source /u/bing/sbi_bmode/.venv/bin/activate
+
+TAG=sample91t_b
+ANADIR=/u/bing/sbi_bmode/scripts
+ODIR=/ptmp/bing/2026_sbi_bmode/posterior_comparison_multifid_run91_narrow
+
+export JAX_ENABLE_X64=True
+export JAX_DEBUG_NANS=True
+export JAX_PLATFORMS=cpu
+
+srun -u --cpu-bind=cores -c $SLURM_CPUS_PER_TASK \
+    python ${ANADIR}/plot_posterior_compare_mpi.py \
+    --posteriors \
+        /ptmp/bing/2026_sbi_bmode/run91hf_optuna_a/trial_0138/posterior.pkl \
+        /ptmp/bing/2026_sbi_bmode/run90_optuna_b/trial_0032/posterior.pkl \
+        /ptmp/bing/2026_sbi_bmode/run89_optuna_g/trial_0133/posterior.pkl \
+    --labels \
+        'Train: MultiFid ($N_{\mathrm{transfer}}=20480,\ N_{\mathrm{obsmat}}=2048$), Test: ObsMat' \
+        'Train: ObsMat $N=20480$, Test: ObsMat' \
+        'Train: Transfer $N=20480$, Test: ObsMat' \
+    --configs \
+        /ptmp/bing/2026_sbi_bmode/run91t/config.yaml \
+        /ptmp/bing/2026_sbi_bmode/run91t_new/config.yaml \
+        /ptmp/bing/2026_sbi_bmode/run91t/config.yaml \
+    --test-data \
+        /ptmp/bing/2026_sbi_bmode/run91t/data_draws_test.npy \
+        /ptmp/bing/2026_sbi_bmode/run91t_new/data_draws_test.npy \
+        /ptmp/bing/2026_sbi_bmode/run91t/data_draws_test.npy \
+    --test-params \
+        /ptmp/bing/2026_sbi_bmode/run91t/param_draws_test.npy \
+        /ptmp/bing/2026_sbi_bmode/run91t_new/param_draws_test.npy \
+        /ptmp/bing/2026_sbi_bmode/run91t/param_draws_test.npy \
+    --nsamp 10000 \
+    --seed 20 \
+    --output \
+        ${ODIR}/corner_zoom.png
+
+cp ./slurm-${SLURM_JOB_ID}.out ${ODIR}/

@@ -161,8 +161,22 @@ run86_beta4 : like run86 but with fiducial_beta_sync=-4
 
 run87 NILC cmb + d + s, config22, 51840 sims, beta_s_pyilc = -1
 run88 NILC cmb + d + s, deproj but no maps, config22, 51840 sims, beta_s_pyilc = -1
-run89 NILC cmb + d + s + dbd + dbs config_run_obsmat01, 640 sims, observation: transfer fucntion
-run89b NILC cmb + d + s + dbd + dbs config_run_obsmat01, 51840 sims, observation: transfer fucntion
+run89 NILC cmb + d + s + dbd + dbs, config_run_obsmat01, 640 sims, obs: transfer function (failed)
+run89d NILC cmb + d + s + dbd + dbs, config_run_obsmat04, 20480 sims, obs: transfer function, correct the noise (d = YBTs + n)
+run89e NILC cmb + d + s + dbd + dbs, config_run_obsmat04, 20480 sims, obs: transfer function, correct the noise, add mask
+
+run90 NILC cmb + d + s + dbd + dbs config_run_obsmat06, 20480 sims, obs: ObsMat, correct the noise (d = OYBs + n)
+run90_a NILC cmb + d + s + dbd + dbs config_run_obsmat06, 20480 sims, obs: ObsMat, correct the noise, add mask
+run90_b NILC cmb + d + s + dbd + dbs config_run_obsmat08, 20480 sims, obs: ObsMat, correct the noise, add mask
+
+run91 multifid (low fid) NILC cmb + d + s + dbd + dbs config_run_obsmat07, 20480 sims, obs: transfer function, correct the noise, add mask
+run91hf_a multifid (high fid) NILC cmb + d + s + dbd + dbs config_run_obsmat08, 2048 sims, obs: ObsMat, correct the noise, add mask
+run91hf_b multifid (high fid) NILC cmb + d + s + dbd + dbs config_run_obsmat08, 4096 sims, obs: ObsMat, correct the noise, add mask
+run91hf_c 128 sims
+run91hf_d 384 sims
+run91hf_e 768 sims
+run91hf_f 1152 sims
+run91hf_g 1536 sims
 
 run52bt	test set with config21 otherwise same as 52b
 run52bt2 rerun of run52bt to test new code
@@ -184,6 +198,8 @@ run87t	test set with config24 (only varying gamma params) otherwise same as 87
 run88t	test set with config24 (only varying gamma params) otherwise same as 88
 run89t  test set with config_run_obsmat01 (observation: transfer function)
 run89t_obsmat test set with config_run_obsmat02 (observation: obsmat)
+run89t_obsmat_g test set with config_run_obsmat08 (observation: obsmat)
+run91t  test set with config_run_obsmat09, obsmat, fixed B_d = 0.01
 
 run65xtra extra test data for run65, used for e-moped compression in TARP test
 run65cov extra test data with fixed parameters rougly at PySM values.
@@ -330,6 +346,11 @@ run86_beta4_optuna : optuna for run86_beta4
 run87_optuna : optuna for run87
 run88_optuna : optuna for run88
 run89_optuna : optuna for run89
+run90_optuna : optuna for run90
+
+run91_optuna : optuna for run91 (low fid)
+run91hf_optuna_a : optuna for run91hf_a (high fid) with the fixed best architecture from run91_optuna (only optimize for learning rate)
+run91hf_optuna_b : optuna for run91hf_b (high fid) with the fixed best architecture from run91_optuna (only optimize for learning rate)
 
 sample52bt : sample the 52bt test set
 sample56t : sample the 56t test set
@@ -419,7 +440,8 @@ sample79t_d10alts5	   : sample the run79t_d10alts5 test set with the run77 model
 
 sample87 : sample the run87t test set
 sample88 : sample the run87t test set
-
+sample91t_a : sample comparing multifid (run91hf_a), obsmat (run90_b), transfer (run89_g)
+sample91t_b : same as sample91t_a with narrower prior on B_d (config_run_obsmat09)
 
 # THESE WERE ALL NOT NEEDED...##
 run52bt_optuna : optuna for run52bt
