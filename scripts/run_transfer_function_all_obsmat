@@ -1,0 +1,33 @@
+#!/bin/bash
+#SBATCH --job-name=tf_all_obsmat
+#SBATCH --nodes=1
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=128
+#SBATCH --time=03:00:00
+#SBATCH --mail-type=ALL
+#SBATCH --mail-user=yenbinhpy308@gmail.com
+#SBATCH --output=slurm-%j.out
+#SBATCH --error=slurm-%j.err
+
+source /mpcdf/modules/init/sh
+
+module purge
+module load gcc/16
+
+export LD_LIBRARY_PATH="$HOME/local/lib:$LD_LIBRARY_PATH"
+export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
+
+source /u/bing/sbi_bmode/.venv/bin/activate
+
+export JAX_ENABLE_X64=True
+export JAX_PLATFORMS=cpu
+
+cd /u/bing/sbi_bmode/scripts
+
+BANDS=(f030 f040 f090 f150 f220 f280)
+FREQ=${BANDS[$SLURM_ARRAY_TASK_ID]}
+
+python estimate_transfer_per_band.py \
+    --config configs/config_compute_transfer_4.yaml \
+    --freq $FREQ \
+    --figdir /ptmp/bing/sbi_bmode_storage/figures/compute_transfer_per_band
