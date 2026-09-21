@@ -1,0 +1,217 @@
+import os
+import numpy as np
+import matplotlib.pyplot as plt
+
+opj = os.path.join
+
+basedir = '/ptmp/bing/2026_sbi_bmode'
+tarpdir = opj(basedir, 'tarp89t_g')
+tarpdir1 = opj(basedir, 'tarp89t_obsmat_g')
+tarpdir2 = opj(basedir, 'tarp91hf_b')
+
+imgdir = opj(tarpdir2, 'img')
+os.makedirs(imgdir, exist_ok=True)
+
+
+# ============================================================
+# Load TARP results: original
+# ============================================================
+
+alpha = np.load(opj(tarpdir, 'tarp_alpha.npy'))
+
+ecp = np.load(opj(tarpdir, 'tarp_ecp.npy')) 
+ecp_boot = np.load(opj(tarpdir, 'tarp_ecp_boot.npy'))
+ecp_std = np.std(ecp_boot, axis=0)
+
+ecp_marg = np.load(opj(tarpdir, 'tarp_ecp_marg.npy'))
+ecp_marg_boot = np.load(opj(tarpdir, 'tarp_ecp_marg_boot.npy'))
+ecp_marg_std = np.std(ecp_marg_boot, axis=1)
+
+
+# ============================================================
+# Load TARP results: ObsMat
+# ============================================================
+
+alpha1 = np.load(opj(tarpdir1, 'tarp_alpha.npy'))
+
+ecp1 = np.load(opj(tarpdir1, 'tarp_ecp.npy'))
+ecp_boot1 = np.load(opj(tarpdir1, 'tarp_ecp_boot.npy'))
+ecp_std1 = np.std(ecp_boot1, axis=0)
+
+ecp_marg1 = np.load(opj(tarpdir1, 'tarp_ecp_marg.npy'))
+ecp_marg_boot1 = np.load(opj(tarpdir1, 'tarp_ecp_marg_boot.npy'))
+ecp_marg_std1 = np.std(ecp_marg_boot1, axis=1)
+
+alpha2 = np.load(opj(tarpdir2, 'tarp_alpha.npy'))
+
+ecp2 = np.load(opj(tarpdir2, 'tarp_ecp.npy'))
+ecp_boot2 = np.load(opj(tarpdir2, 'tarp_ecp_boot.npy'))
+ecp_std2 = np.std(ecp_boot2, axis=0)
+
+ecp_marg2 = np.load(opj(tarpdir2, 'tarp_ecp_marg.npy'))
+ecp_marg_boot2 = np.load(opj(tarpdir2, 'tarp_ecp_marg_boot.npy'))
+ecp_marg_std2 = np.std(ecp_marg_boot2, axis=1)
+# ============================================================
+# Plot
+# ============================================================
+
+fig, ax = plt.subplots(figsize=(3.55, 3.55), dpi=300)
+
+# Ideal calibration
+ax.plot(
+    alpha, alpha,
+    'k--',
+    lw=1,
+    label='Ideal'
+)
+
+
+# ============================================================
+# Original TARP
+# ============================================================
+
+ax.plot(
+    alpha, ecp,
+    lw=1,
+    linestyle='-',
+    label='Joint TARP'
+)
+
+ax.fill_between(
+    alpha,
+    ecp - 2 * ecp_std,
+    ecp + 2 * ecp_std,
+    alpha=0.2
+)
+
+for pidx, param in zip([0, 1], [r'$r$', r'$A_{\mathrm{lens}}$']):
+
+    ax.plot(
+        alpha,
+        ecp_marg[pidx],
+        lw=1,
+        linestyle='-',
+        label=param
+    )
+
+    ax.fill_between(
+        alpha,
+        ecp_marg[pidx] - 2 * ecp_marg_std[pidx],
+        ecp_marg[pidx] + 2 * ecp_marg_std[pidx],
+        alpha=0.2
+    )
+
+
+# ============================================================
+# ObsMat TARP
+# ============================================================
+
+ax.plot(
+    alpha, ecp1,
+    lw=1,
+    linestyle=':',
+    label='Joint TARP (ObsMat)'
+)
+
+ax.fill_between(
+    alpha,
+    ecp1 - 2 * ecp_std1,
+    ecp1 + 2 * ecp_std1,
+    alpha=0.15
+)
+
+for pidx, param in zip([0, 1], [r'$r$', r'$A_{\mathrm{lens}}$']):
+
+    ax.plot(
+        alpha,
+        ecp_marg1[pidx],
+        lw=1,
+        linestyle=':',
+        label=param + ' (ObsMat)'
+    )
+
+    ax.fill_between(
+        alpha,
+        ecp_marg1[pidx] - 2 * ecp_marg_std1[pidx],
+        ecp_marg1[pidx] + 2 * ecp_marg_std1[pidx],
+        alpha=0.15
+    )
+
+# ============================================================
+# ObsMat TARP Multifidelity
+# ============================================================
+
+ax.plot(
+    alpha, ecp2,
+    lw=1,
+    linestyle='--',
+    label='Joint TARP (MultiFid)'
+)
+
+ax.fill_between(
+    alpha,
+    ecp2 - 2 * ecp_std2,
+    ecp2 + 2 * ecp_std2,
+    alpha=0.15
+)
+
+for pidx, param in zip([0, 1], [r'$r$', r'$A_{\mathrm{lens}}$']):
+
+    ax.plot(
+        alpha,
+        ecp_marg2[pidx],
+        lw=1,
+        linestyle='--',
+        label=param + ' (MultiFid)'
+    )
+
+    ax.fill_between(
+        alpha,
+        ecp_marg2[pidx] - 2 * ecp_marg_std2[pidx],
+        ecp_marg2[pidx] + 2 * ecp_marg_std2[pidx],
+        alpha=0.15
+    )
+
+
+# ============================================================
+# Formatting
+# ============================================================
+
+ax.set_xlim(-0.1, 1.1)
+ax.set_ylim(-0.1, 1.1)
+
+ax.set_xlabel(r'Credibility level $1-\alpha$')
+ax.set_ylabel(r'$\mathrm{ECP}$')
+ax.set_title(r"Multifidelity N = 4096")
+
+ax.tick_params(
+    'both',
+    which='both',
+    direction='in',
+    right=True,
+    top=True
+)
+
+ax.grid(
+    color='black',
+    linestyle='dotted',
+    linewidth=0.5
+)
+
+ax.legend(
+    frameon=False,
+    loc='upper left',
+    fontsize=8
+)
+
+fig.savefig(
+    opj(imgdir, 'tarp_compare_obsmat.png'),
+    bbox_inches='tight'
+)
+
+fig.savefig(
+    opj(imgdir, 'tarp_compare_obsmat.pdf'),
+    bbox_inches='tight'
+)
+
+plt.show()
