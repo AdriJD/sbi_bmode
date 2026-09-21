@@ -115,23 +115,25 @@ def plot_posterior(opath, samples, config, param_truths, cosmo_only=False):
     g.export(opath, dpi=300)
     plt.close(g.fig)
 
-def sample(posterior, data_obs, nsamp=10000):
-    '''
+def sample(posterior, data_obs, nsamp=10000, max_sampling_time=8.0):
+    used_mcmc = False
+    try:
+        samples = posterior.sample(
+            (nsamp,), x=data_obs, show_progress_bars=False,
+            max_sampling_time=max_sampling_time)
+        if samples.shape[0] < nsamp:
+            raise RuntimeError('rejection sampling returned too few samples')
+    except RuntimeError:
+        used_mcmc = True
+        with torch.no_grad():
+            samples = posterior.sample(
+                (nsamp,), x=data_obs, show_progress_bars=False,
+                reject_outside_prior=False)
 
-    Parameters
-    ----------
-
-    Returns
-    -------
-    samples : (nsamp, nparam)
-        Posterior draws for each input dataset.
-    '''
-
-    samples = posterior.sample(
-        (nsamp,), x=data_obs, show_progress_bars=False)
+    if isinstance(samples, torch.Tensor):
+        samples = samples.detach().cpu().numpy()
     samples = np.asarray(samples, dtype=np.float64)
-    
-    return samples
+    return samples, used_mcmc
 
 if __name__ == '__main__':
 
@@ -194,12 +196,18 @@ if __name__ == '__main__':
     idxs_on_rank = idxs_per_rank[comm.rank]
     samples_on_rank = np.zeros((len(idxs_on_rank), args.nsamp, nparam))
     
+    mcmc_flags_on_rank = np.zeros(len(idxs_on_rank), dtype=bool)
+
     for idx, ridx in enumerate(idxs_on_rank):
-    
-        samples_on_rank[idx] = sample(posterior, data[ridx], nsamp=args.nsamp)
-    
+
+        samples_on_rank[idx], mcmc_flags_on_rank[idx] = sample(
+            posterior, data[ridx], nsamp=args.nsamp)
+
+        if mcmc_flags_on_rank[idx]:
+            print(f'[rank {comm.rank}] sim {ridx} fell back to MCMC')
+
         plot_posterior(opj(imgdir, f'corner_{ridx:03d}.png'), samples_on_rank[idx],
-                       config, params[ridx], cosmo_only=args.cosmo_only)
+                    config, params[ridx], cosmo_only=args.cosmo_only)
                    
     # Save all samples in one array.
     if comm.rank == 0:
