@@ -13,10 +13,9 @@ data:
   highpass_delta_ell: 5
   
 observation:
-  type: obsmat
-  obsmat_dir: "/u/bing/so-data/mss2"
-  obsmat_freq: "f090"
-  
+  type: transfer_function
+  transfer_function_file: "/u/bing/sbi_bmode/data/transfer_function_90_no_highpass_map_noise.npy"
+
 transfer_function:
   mask_file: "/u/bing/sbi_bmode/data/full_mask_nside128.fits"
   ell_bin: 10
