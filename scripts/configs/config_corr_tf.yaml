@@ -14,7 +14,7 @@ data:
 
 observation:
   type: transfer_function
-  transfer_function_file: "/u/bing/sbi_bmode/data/transfer_function_90_no_highpass.npy"
+  transfer_function_file: "/u/bing/sbi_bmode/data/transfer_function_90_no_highpass_map_noise.npy"
 
 transfer_function:
   mask_file: "/u/bing/sbi_bmode/data/full_mask_nside128.fits"
@@ -22,7 +22,6 @@ transfer_function:
   apod_scale: 2.0
   apod_type: "C2"
   nsims: 300
-  output_file: "transfer_function_300_sim.npy"
 
 fixed_params:
   freq_pivot_dust: 353.0e+9
