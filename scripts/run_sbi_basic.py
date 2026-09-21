@@ -2,6 +2,7 @@ import os
 import yaml
 import pickle
 import argparse
+import json
 
 import numpy as np
 from mpi4py import MPI
@@ -219,7 +220,9 @@ def main(odir, config, specdir, seed, n_train, n_samples, n_rounds, pyilcdir, us
          previous_params_file=None, num_hidden_features=50, num_transforms=5,
          num_blocks=2, clip_max_norm=5.0, training_batch_size=200, learning_rate=5e-4,
          max_num_epochs=1000, stop_after_epochs=20, tsnpe=False, mask_file=None, no_cmb_ee=False,
-         fg_template_files=None, test_proposal_file=None, test_data_obs_file=None, comm=comm):
+         fg_template_files=None, test_proposal_file=None, test_data_obs_file=None, 
+         save_net_state_dict=False,
+         comm=comm):
     '''
     Run SBI.
 
@@ -561,11 +564,6 @@ def main(odir, config, specdir, seed, n_train, n_samples, n_rounds, pyilcdir, us
                                         num_blocks=num_blocks)
         inference = SNPE(prior=prior, density_estimator=neural_posterior)
     elif fmpe:
-        # net_builder = flowmatching_nn(
-        #     model="resnet",
-        #     num_blocks=3,
-        #     hidden_features=24
-        # )
         net_builder = posterior_flow_nn(
             model="resnet",
             num_blocks=3,
@@ -573,7 +571,10 @@ def main(odir, config, specdir, seed, n_train, n_samples, n_rounds, pyilcdir, us
         )
         inference = FMPE(prior, density_estimator=net_builder)
     else:
-        neural_posterior = posterior_nn(model=density_estimator_type)
+        neural_posterior = posterior_nn(model=density_estimator_type,
+                                        hidden_features=num_hidden_features,
+                                        num_transforms=num_transforms,
+                                        num_blocks=num_blocks)
         inference = SNPE(prior, density_estimator=neural_posterior)
 
     # Train the SNPE. Allow n_rounds = 0 to only produce a test set.
@@ -663,7 +664,18 @@ def main(odir, config, specdir, seed, n_train, n_samples, n_rounds, pyilcdir, us
                 pickle.dump(posterior, handle)
             script_utils.symlink_force(opj(odir, f'samples_round_{ridx:03d}.npy'), opj(odir, f'samples.npy'))
             np.save(opj(odir, 'training_loss.npy'), np.asarray(inference.summary['training_loss']))
-            np.save(opj(odir, 'validation_loss.npy'), np.asarray(inference.summary['validation_loss']))            
+            np.save(opj(odir, 'validation_loss.npy'), np.asarray(inference.summary['validation_loss'])) 
+            if save_net_state_dict:
+                torch.save(inference._neural_net.state_dict(), opj(odir, 'net_state_dict.pt'))
+                arch = {
+                    'hidden_features': num_hidden_features,
+                    'num_transforms': num_transforms,
+                    'num_blocks': num_blocks,
+                    'density_estimator_type': density_estimator_type,
+                    'embed': embed,
+                }
+                with open(opj(odir, 'net_arch.json'), 'w') as fh:
+                    json.dump(arch, fh, indent=2)
         if x_obs_full is not None:
             np.save(opj(odir, 'data_uncompressed.npy'), x_obs_full)
         if x_obs_mf is not None:
@@ -794,7 +806,12 @@ if __name__ == '__main__':
                         help='Path to .npy file containing std of data distribution used for previous run.')    
     parser.add_argument('--previous-seed-file', type=str,
                         help='Path to .npy file containing seed integer(s)')
-    
+
+    # Option to save neural state
+    parser.add_argument('--save-net-state-dict', action='store_true',
+                        help="Save the trained density estimator's state_dict and its "
+                            "architecture, for later warm-starting via check_estimators.py.")
+
     args = parser.parse_args()
     
     odir = args.odir
@@ -839,5 +856,6 @@ if __name__ == '__main__':
         max_num_epochs=args.max_num_epochs, stop_after_epochs=args.stop_after_epochs,
         tsnpe=args.tsnpe, mask_file=args.mask_file, no_cmb_ee=args.no_cmb_ee, 
         fg_template_files=fg_template_files, 
-        test_proposal_file=args.test_proposal, test_data_obs_file=args.test_data_obs)
+        test_proposal_file=args.test_proposal, test_data_obs_file=args.test_data_obs,
+        save_net_state_dict=args.save_net_state_dict)
     
