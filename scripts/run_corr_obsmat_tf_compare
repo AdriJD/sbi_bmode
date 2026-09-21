@@ -1,0 +1,27 @@
+#!/bin/bash
+#SBATCH --job-name=corr_obsmat_tf_compare
+#SBATCH --nodes=1
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=128
+#SBATCH --time=00:45:00
+#SBATCH --mail-type=ALL
+#SBATCH --mail-user=yenbinhpy308@gmail.com
+#SBATCH --output=slurm-%j.out
+#SBATCH --error=slurm-%j.err
+
+source /mpcdf/modules/init/sh
+
+module purge
+module load gcc/16
+
+export LD_LIBRARY_PATH="$HOME/local/lib:$LD_LIBRARY_PATH"
+export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
+
+source /u/bing/sbi_bmode/.venv/bin/activate
+
+export JAX_ENABLE_X64=True
+export JAX_PLATFORMS=cpu
+
+cd /u/bing/sbi_bmode/scripts
+
+python corr_obsmat_tf_compare.py
